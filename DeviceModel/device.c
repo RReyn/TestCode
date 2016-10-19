@@ -21,7 +21,6 @@ virtual_bus_release(struct device *dev)
 }
 
 struct device virtual_device = {
-//	.bus_id = "test_dev",
 	.init_name = "test_dev",
 	.bus = &virtual_bus,
 	.parent = &test_bus,
