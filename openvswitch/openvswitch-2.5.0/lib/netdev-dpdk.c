@@ -2984,7 +2984,6 @@ dpdkbond_unixctl_show_info(struct unixctl_conn *conn,
 	uint8_t port_id;
 	int retval = 0;
 	char *nic_info_border = "=======================";
-	
 
 	retval = dpdkbond_get_portid(dpdkbond, &port_id);
 	if (retval < 0) {
@@ -3115,7 +3114,6 @@ dpdkbond_unixctl_show_infos_all(struct unixctl_conn *conn,
 		int argc OVS_UNUSED, const char *argv[] OVS_UNUSED,
 		void *aux OVS_UNUSED)
 {
-		
 	struct ds ds = DS_EMPTY_INITIALIZER;
 	uint8_t pid;
 	
@@ -3131,7 +3129,6 @@ dpdkbond_unixctl_show_stats_all(struct unixctl_conn *conn,
 		int argc OVS_UNUSED, const char *argv[] OVS_UNUSED,
 		void *aux OVS_UNUSED)
 {
-		
 	struct ds ds = DS_EMPTY_INITIALIZER;
 	uint8_t pid;
 	
