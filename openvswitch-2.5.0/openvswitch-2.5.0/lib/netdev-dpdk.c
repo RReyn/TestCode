@@ -159,12 +159,6 @@ static struct ovs_list dpdk_mp_list OVS_GUARDED_BY(dpdk_mutex)
 static struct ovs_mutex nonpmd_mempool_mutex = OVS_MUTEX_INITIALIZER;
 
 /****************** add by ry begin *********************/
-enum {
-	PORT_TOPOLOGY_PAIRED,
-	PORT_TOPOLOGY_CHAINED,
-	PORT_TOPOLOGY_LOOP,
-};
-
 #define RTE_PORT_STOPPED        (uint16_t)0
 #define RTE_PORT_STARTED        (uint16_t)1
 #define RTE_PORT_CLOSED         (uint16_t)2
@@ -177,33 +171,6 @@ struct queue_stats_mappings {
 } __rte_cache_aligned;
 
 /**
- *  * The data structure associated with a forwarding stream between a receive
- *   * port/queue and a transmit port/queue.
- *    */
-struct fwd_stream {
-	/* "read-only" data */
-	uint8_t rx_port;   /**< port to poll for received packets */
-	uint16_t rx_queue;  /**< RX queue to poll on "rx_port" */
-	uint8_t tx_port;   /**< forwarding port of received packets */
-	uint16_t tx_queue;  /**< TX queue to send forwarded packets */
-	uint16_t peer_addr; /**< index of peer ethernet address of packets */
-
-	/* "read-write" results */
-	unsigned int rx_packets;  /**< received packets */
-	unsigned int tx_packets;  /**< received packets transmitted */
-	unsigned int fwd_dropped; /**< received packets not forwarded */
-	unsigned int rx_bad_ip_csum ; /**< received packets has bad ip checksum */
-	unsigned int rx_bad_l4_csum ; /**< received packets has bad l4 checksum */
-#ifdef RTE_TEST_PMD_RECORD_CORE_CYCLES
-	uint64_t     core_cycles; /**< used for RX and TX processing */
-#endif
-#ifdef RTE_TEST_PMD_RECORD_BURST_STATS
-	struct pkt_burst_stats rx_burst_stats;
-	struct pkt_burst_stats tx_burst_stats;
-#endif
-};
-
-/**
  *  * The data structure associated with each port.
  *   */
 struct rte_port {
@@ -213,8 +180,6 @@ struct rte_port {
 	struct ether_addr       eth_addr;   /**< Port ethernet address */
 	struct rte_eth_stats    stats;      /**< Last port statistics */
 	uint64_t                tx_dropped; /**< If no descriptor in TX ring */
-	struct fwd_stream       *rx_stream; /**< Port RX stream, if unique */
-	struct fwd_stream       *tx_stream; /**< Port TX stream, if unique */
 	unsigned int            socket_id;  /**< For NUMA support */
 	uint16_t                tx_ol_flags;/**< TX Offload Flags (TESTPMD_TX_OFFLOAD...). */
 	uint16_t                tso_segsz;  /**< MSS for segmentation offload. */
@@ -259,8 +224,6 @@ static uint8_t find_next_port(uint8_t p, struct rte_port *ports, int size);
 static uint8_t nb_ports = 0;
 struct rte_port *ports; /* For all probed ethernet ports. */
 
-//static uint8_t BOND_PORT = 0xff;
-
 static struct ovs_list dpdk_bond_list OVS_GUARDED_BY(dpdk_mutex)
 	    = OVS_LIST_INITIALIZER(&dpdk_bond_list);
 
@@ -294,6 +257,7 @@ struct rte_fdir_conf fdir_conf = {
 };
 
 #define MAX_SLAVE_ID	2 /* always bind port id 0, 1 in bond */
+#define RTE_PORT_ALL	(~(uint8_t)0x0)
 
 uint64_t rss_hf = ETH_RSS_IP;
 uint16_t nb_rxq = NR_QUEUE;
@@ -307,7 +271,7 @@ uint16_t nb_txq = NR_QUEUE;
 uint16_t nb_rxd = RTE_TEST_RX_DESC_DEFAULT; /* number of RX descriptors*/
 uint16_t nb_txd = RTE_TEST_TX_DESC_DEFAULT; /* number of TX descriptors*/
 	
-#define RTE_PMD_PARAM_UNSET -1
+#define RTE_PMD_PARAM_UNSET	-1
 /*
  *  * Configurable values of RX and TX ring threshold registers.
  *   */
@@ -325,12 +289,9 @@ int8_t rx_drop_en = RTE_PMD_PARAM_UNSET;
 int16_t tx_free_thresh = RTE_PMD_PARAM_UNSET;
 int16_t tx_rs_thresh = RTE_PMD_PARAM_UNSET;
 int32_t txq_flags = RTE_PMD_PARAM_UNSET;
-//uint64_t rss_hf = ETH_RSS_IP; /* RSS IP by default. */
-uint16_t port_topology = PORT_TOPOLOGY_PAIRED; /* Ports are paired by default */
-uint8_t no_flush_rx = 0; /* flush by default */
 
-#define MAX_TX_QUEUE_STATS_MAPPINGS 1024 /* MAX_PORT of 32 @ 32 tx_queues/port */
-#define MAX_RX_QUEUE_STATS_MAPPINGS 4096 /* MAX_PORT of 32 @ 128 rx_queues/port */
+#define MAX_TX_QUEUE_STATS_MAPPINGS	1024 /* MAX_PORT of 32 @ 32 tx_queues/port */
+#define MAX_RX_QUEUE_STATS_MAPPINGS	4096 /* MAX_PORT of 32 @ 128 rx_queues/port */
 
 struct queue_stats_mappings tx_queue_stats_mappings_array[MAX_TX_QUEUE_STATS_MAPPINGS];
 struct queue_stats_mappings rx_queue_stats_mappings_array[MAX_RX_QUEUE_STATS_MAPPINGS];
@@ -352,9 +313,6 @@ struct rte_eth_rxmode rx_mode = {
 	.jumbo_frame    = 0, /**< Jumbo Frame Support disabled. */
 	.hw_strip_crc   = 0, /**< CRC stripping by hardware disabled. */
 };
-
-#define RTE_PORT_ALL (~(uint8_t)0x0)
-
 /*************************** add by ry end ********************/
 
 struct dpdk_mp {
@@ -2520,22 +2478,32 @@ process_vhost_flags(char *flag, char *default_val, int size,
     return changed;
 }
 
-/* add by ry*/
-static void
+/* add by renyong*/
+static int
 init_port(void)
 {
 	uint8_t portid;
+	int socketid;
 
 	ports = dpdk_rte_mzalloc(sizeof(struct rte_port) * RTE_MAX_ETHPORTS);
 	if (ports == NULL) {
 		VLOG_ERR("dpdk_rte_mzalloc (%d struct rte_port) failed.\n",
 				RTE_MAX_ETHPORTS);
+		return -1;
 	}
 
 	/* enabled allocated ports */
 	for (portid = 0; portid < nb_ports; portid++) {
 		ports[portid].enabled = 1;
+		socketid = rte_eth_dev_socket_id(portid);
+		socketid = socketid < 0 ? SOCKET0 : socketid;
+
+		if (dpdk_mp_get(socketid, ETHER_MTU) == NULL) {
+			DPDK_DBG("dpdk_mp_get return NULL.\n");	
+			return -1;
+		}
 	}
+	return 0;
 }
 
 int
@@ -2603,14 +2571,22 @@ dpdk_init(int argc, char **argv)
         argv[result] = argv[0];
     }
 
-    /*add by ry*/
+    /*add by renyong begin*/
     nb_ports = rte_eth_dev_count();
     if (nb_ports == 0) {
 	VLOG_INFO("No probed ethernet devices.\n");
+    } else if (nb_ports > RTE_MAX_ETHPORTS) {
+	VLOG_ERR("Current ports number is %d > RTE_MAX_ETHPORTS(%d)\n",
+            nb_ports, RTE_MAX_ETHPORTS);
+        return -1;
     }
 
     /* allocate port structures, and init them */
-    init_port();
+    if (init_port()) {
+	VLOG_ERR("Init port failed.\n");
+        return -1;
+    }
+    /*add by renyong end*/
 
     /* We are called from the main thread here */
     RTE_PER_LCORE(_lcore_id) = NON_PMD_CORE_ID;
@@ -2674,16 +2650,16 @@ static const struct netdev_class OVS_UNUSED dpdk_vhost_user_class =
         NULL,
         netdev_dpdk_vhost_rxq_recv);
 
-/**************************** add by ry Begin****************************/
+/**************************** add by renyong Begin****************************/
 static char *
 flowtype_to_str(uint16_t flow_type)
 {
+	uint8_t i;
 	struct flow_type_info {
 		char str[32];
 		uint16_t ftype;
 	};
 
-	uint8_t i;
 	static struct flow_type_info flowtype_str_table[] = {
 		{"raw", RTE_ETH_FLOW_RAW},
 		{"ipv4", RTE_ETH_FLOW_IPV4},
@@ -2788,8 +2764,7 @@ dpdk_print_stats_details(struct ds *ds, uint8_t port_id)
 		ds_put_format(ds, "  TX-packets: %-10"PRIu64" TX-errors: %-10"PRIu64" TX-bytes:  "
 		       "%-"PRIu64"\n",
 		       stats.opackets, stats.oerrors, stats.obytes);
-	}
-	else {
+	} else {
 		ds_put_format(ds, "  RX-packets:              %10"PRIu64"    RX-errors: %10"PRIu64
 		       "    RX-bytes: %10"PRIu64"\n",
 		       stats.ipackets, stats.ierrors, stats.ibytes);
@@ -3290,9 +3265,8 @@ map_port_queue_stats_mapping_registers(uint8_t pi, struct rte_port *port)
 			DPDK_DBG("TX queue stats mapping not supported port id=%d\n", pi);
 		} else {
 			rte_exit(EXIT_FAILURE,
-					"set_tx_queue_stats_mapping_registers "
-					"failed for port id=%d diag=%d\n",
-					pi, diag);
+				"set_tx_queue_stats_mapping_registers "
+				"failed for port id=%d diag=%d\n", pi, diag);
 		}
 	}
 
@@ -3303,9 +3277,8 @@ map_port_queue_stats_mapping_registers(uint8_t pi, struct rte_port *port)
 			DPDK_DBG("RX queue stats mapping not supported port id=%d\n", pi);
 		} else {
 			rte_exit(EXIT_FAILURE,
-					"set_rx_queue_stats_mapping_registers "
-					"failed for port id=%d diag=%d\n",
-					pi, diag);
+				"set_rx_queue_stats_mapping_registers "
+				"failed for port id=%d diag=%d\n", pi, diag);
 		}
 	}
 }
@@ -3335,12 +3308,13 @@ init_port_config(void)
 		}
 
 		if (port->dev_info.max_vfs != 0) {
-			if (port->dev_conf.rx_adv_conf.rss_conf.rss_hf != 0)
+			if (port->dev_conf.rx_adv_conf.rss_conf.rss_hf != 0) {
 				port->dev_conf.rxmode.mq_mode =
 					ETH_MQ_RX_VMDQ_RSS;
-			else
+			} else {
 				port->dev_conf.rxmode.mq_mode =
 					ETH_MQ_RX_NONE;
+			}
 
 			port->dev_conf.txmode.mq_mode = ETH_MQ_TX_NONE;
 		}
@@ -3369,15 +3343,16 @@ static int
 dpdk_bond_add_slave(uint8_t master_portid)
 {
 	uint8_t pid = 0;
+
 	for (pid = 0; pid < MAX_SLAVE_ID; pid++) {
 		if (rte_eth_bond_slave_add(master_portid, pid) != 0) {
 			DPDK_DBG("Failed to add slave %u to master port %u\n",
 					pid, master_portid);
 			return -1;
 		}
-		init_port_config();
 		set_port_slave_flag(pid);
 	}
+	init_port_config();
 	return 0;
 }
 
@@ -3484,7 +3459,6 @@ dpdk_bond_start_port(uint8_t portid)
 	uint16_t qi;
 	struct rte_port *port;
 	struct ether_addr mac_addr;
-//	struct rte_eth_link link;
 
 	FOREACH_PORT(pi, ports)	{
 		if (pi != portid && portid != (uint8_t)RTE_PORT_ALL)
@@ -3544,10 +3518,7 @@ dpdk_bond_start_port(uint8_t portid)
 			
 			for (qi = 0; qi < nb_rxq; qi++) {
 				struct dpdk_mp *mp = NULL;
-#if 0
-				int socket_id = rte_eth_dev_socket_id(pi) < 0;
-				socket_id = socket_id < 0 ? SOCKET0 : socket_id;
-#endif
+
 				mp = dpdk_mp_get(SOCKET0, ETHER_MTU);
 				if (mp == NULL) {
 					DPDK_DBG("dpdk_mp_get failed.\n");
@@ -3583,8 +3554,6 @@ dpdk_bond_start_port(uint8_t portid)
 			}
 			continue;
 		}
-//		rte_eth_link_get_nowait(pi, &link);
-//		DPDK_DBG("Port %d link status: %s, Speed: %u Mbps\n", pi, link.link_status?"UP":"DOWN", (unsigned)link.link_speed);
 
 		if (rte_atomic16_cmpset(&(port->port_status), RTE_PORT_HANDLING,
 					RTE_PORT_STARTED) == 0) {
@@ -3677,7 +3646,7 @@ dpdk_bond_open(const char *dev_name,
 }
 
 static int
-dpdk_eth_bond_init(struct netdev_dpdk *netdev) OVS_REQUIRES(dpdk_mutex)
+_netdev_dpdk_bond_start(struct netdev_dpdk *netdev) OVS_REQUIRES(dpdk_mutex)
 {
 	int err = 0;
 
@@ -3705,11 +3674,7 @@ netdev_dpdk_bond_start(struct netdev *netdev_, unsigned int port_no,
 
 	rte_spinlock_init(&netdev->stats_lock);
 	
-	if (type == DPDK_DEV_ETH) {
-		sid = rte_eth_dev_socket_id(port_no);
-	} else {
-		sid = rte_lcore_to_socket_id(rte_get_master_lcore());
-	}
+	sid = rte_eth_dev_socket_id(port_no);
 	
 	netdev->socket_id = sid < 0 ? SOCKET0 : sid;
 	netdev->port_id = port_no;
@@ -3729,10 +3694,8 @@ netdev_dpdk_bond_start(struct netdev *netdev_, unsigned int port_no,
 	netdev_->n_rxq = nb_rxq;
 	netdev->real_n_txq = nb_txq;
 	
-	if (type == DPDK_DEV_ETH) {
-		netdev_dpdk_alloc_txq(netdev, nb_txq);
-		err = dpdk_eth_bond_init(netdev);
-	}
+	netdev_dpdk_alloc_txq(netdev, nb_txq);
+	err = _netdev_dpdk_bond_start(netdev);
 	list_push_back(&dpdk_list, &netdev->list_node);
 unlock:
 	if (err) {
@@ -3745,36 +3708,23 @@ unlock:
 static void
 init_slave_port(void)
 {
-	struct dpdk_mp *mp = NULL;
 	uint8_t pi;
-	int socketid, i = 0;
 	struct rte_port *port;
-
-	for (i = 0; i < nb_ports; i++) {
-		socketid = rte_eth_dev_socket_id(i);
-		socketid = socketid < 0 ? SOCKET0 : socketid;
-		DPDK_DBG("====== socketid: %d =======\n", socketid);
-
-		mp = dpdk_mp_get(socketid, ETHER_MTU);
-		if (mp == NULL) {
-			DPDK_DBG("dpdk_mp_get return NULL.\n");	
-			return;		
-		}
-	}
+	int socketid = 0;
 
 	FOREACH_PORT(pi, ports) {
 		port = &ports[pi];
 		rte_eth_dev_info_get(pi, &port->dev_info);
+		rte_eth_promiscuous_enable(pi);
+		socketid = rte_eth_dev_socket_id(pi);
+		port->socket_id = socketid < 0 ? SOCKET0 : socketid;
 		port->need_reconfig = 1;
 		port->need_reconfig_queues = 1;
 	}	
 
-
 	init_port_config();
 
 	dpdk_bond_start_port(RTE_PORT_ALL);
-	FOREACH_PORT(pi, ports)
-		rte_eth_promiscuous_enable(pi);
 }
 
 static int
@@ -3844,8 +3794,7 @@ netdev_register_dpdkbond_provider(const struct netdev_class *class)
 	netdev_register_provider(class);	
 	dpdkbond_init();	
 }
-
-/**************************** add by ry End****************************/
+/**************************** add by renyong End****************************/
 
 void
 netdev_dpdk_register(void)
