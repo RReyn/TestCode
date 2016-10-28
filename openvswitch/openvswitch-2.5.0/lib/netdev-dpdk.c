@@ -771,7 +771,11 @@ netdev_dpdk_init(struct netdev *netdev_, unsigned int port_no,
     netdev->socket_id = sid < 0 ? SOCKET0 : sid;
     netdev->port_id = port_no;
     netdev->type = type;
-    netdev->flags = 0;
+    if (type == DPDK_DEV_VHOST) {
+        netdev->flags |= NETDEV_UP;
+    } else {
+        netdev->flags = 0;
+    }
     netdev->mtu = ETHER_MTU;
     netdev->max_packet_len = MTU_TO_MAX_LEN(netdev->mtu);
 
@@ -1663,6 +1667,23 @@ netdev_dpdk_vhost_get_stats(const struct netdev *netdev,
     ovs_mutex_unlock(&dev->mutex);
 
     return 0;
+}
+
+static int
+netdev_dpdk_vhost_get_features(const struct netdev *netdev_ OVS_UNUSED,
+			enum netdev_features *current OVS_UNUSED,
+			enum netdev_features *advertised OVS_UNUSED,
+			enum netdev_features *supported OVS_UNUSED,
+			enum netdev_features *peer OVS_UNUSED)
+{
+	return 0;
+}
+
+static int
+netdev_dpdk_vhost_get_status(const struct netdev *netdev_ OVS_UNUSED,
+			struct smap *args OVS_UNUSED)
+{
+	return 0;
 }
 
 static int
@@ -2646,8 +2667,8 @@ static const struct netdev_class OVS_UNUSED dpdk_vhost_user_class =
         netdev_dpdk_vhost_send,
         netdev_dpdk_vhost_get_carrier,
         netdev_dpdk_vhost_get_stats,
-        NULL,
-        NULL,
+        netdev_dpdk_vhost_get_features,
+        netdev_dpdk_vhost_get_status,
         netdev_dpdk_vhost_rxq_recv);
 
 /**************************** add by renyong Begin****************************/
@@ -2698,11 +2719,12 @@ dpdkbond_find(const char *dev_name)
 	ovs_mutex_lock(&dpdk_mutex);
 	LIST_FOR_EACH(netdev, list_node, &dpdk_list) {
 		if (!strcmp(netdev->up.name, dev_name)) {
-			break;	
+			ovs_mutex_unlock(&dpdk_mutex);
+			return netdev;
 		}
 	}
 	ovs_mutex_unlock(&dpdk_mutex);
-	return netdev;
+	return NULL;
 }
 
 static int 
@@ -2816,14 +2838,14 @@ dpdk_print_info_details(struct ds *ds, uint8_t portid)
 	dpdk_bond_print_mac(ds, portid);
 	ds_put_format(ds, "Connect to socket: %u\n", port->socket_id);
 	ds_put_format(ds, "Memory allocation on the socket: %u\n", port->socket_id);	
-	ds_put_format(ds, "Link status: %s\n", (link.link_status)? "UP": "DOWN");
+	ds_put_format(ds, "Link status: %s\n", (link.link_status)? ("UP"): ("DOWN"));
 	ds_put_format(ds, "Link speed: %u Mbps\n", (unsigned)link.link_speed);
 	ds_put_format(ds, "Link duplex: %s\n", (link.link_duplex == ETH_LINK_FULL_DUPLEX) ? 
 				"Full-duplex": "Half-duplex");
 	ds_put_format(ds, "Promiscuous mode: %s\n", 
-			rte_eth_promiscuous_get(portid)?"Enabled":"Disabled");
+			rte_eth_promiscuous_get(portid)?("Enabled"):("Disabled"));
 	ds_put_format(ds, "Allmulticast mode: %s\n",
-			rte_eth_allmulticast_get(portid)? "Enabled":"Disabled");
+			rte_eth_allmulticast_get(portid)? ("Enabled"):("Disabled"));
 	ds_put_format(ds, "Maximum number of Mac addresses: %u\n",
 			(unsigned int)(port->dev_info.max_mac_addrs));
 	ds_put_format(ds, "Maximum number of MAC addresses of hash filtering: %u\n",
@@ -3327,6 +3349,18 @@ init_port_config(void)
 	}
 }
 
+static int
+port_id_is_invalid(uint8_t pid)
+{
+	if (pid == (uint8_t)RTE_PORT_ALL)
+		return 0;
+
+	if (pid < RTE_MAX_ETHPORTS && ports[pid].enabled)
+		return 0;
+	DPDK_DBG("Invalid port: %u\n", pid);
+	return 1;
+}
+
 static void
 set_port_slave_flag(uint8_t slave_id)
 {
@@ -3457,6 +3491,9 @@ dpdk_bond_start_port(uint8_t portid)
 	struct rte_port *port;
 	struct ether_addr mac_addr;
 
+	if (port_id_is_invalid(portid))
+		return 0;
+
 	FOREACH_PORT(pi, ports)	{
 		if (pi != portid && portid != (uint8_t)RTE_PORT_ALL)
 			continue;
@@ -3571,6 +3608,43 @@ dpdk_bond_start_port(uint8_t portid)
 		DPDK_DBG("Please stop the ports first\n");
 	}
 	return 0;
+}
+
+static void
+dpdk_bond_stop_port(uint8_t portid)
+{
+	uint8_t pid;
+	struct rte_port *port;
+	int need_check_link_status = 0;
+
+	if (port_id_is_invalid(portid)) {
+		return;
+	}
+	DPDK_DBG("Stopping ports...\n");
+
+	FOREACH_PORT(pid, ports) {
+		if (pid != portid && portid != (uint8_t)RTE_PORT_ALL) {
+			continue;
+		}
+
+		port = &ports[pid];
+		if (rte_atomic16_cmpset(&(port->port_status), RTE_PORT_STARTED,
+					RTE_PORT_HANDLING) == 0) {
+			continue;
+		}
+
+		rte_eth_dev_stop(pid);
+
+		if (rte_atomic16_cmpset(&(port->port_status),
+					RTE_PORT_HANDLING, RTE_PORT_STOPPED) == 0) {
+			DPDK_DBG("Port %d can not be set into stopped\n", pid);
+		}
+		need_check_link_status = 1;
+	}
+	if (need_check_link_status) {
+		check_all_ports_link_status(RTE_PORT_ALL);
+	}
+	DPDK_DBG("Done\n");
 }
 
 /*create dpdk bond device*/
@@ -3758,7 +3832,10 @@ netdev_dpdk_bond_destruct(struct netdev *netdev_ OVS_UNUSED)
 	struct netdev_dpdk *dev = netdev_dpdk_cast(netdev_);
 
 	ovs_mutex_lock(&dev->mutex);
+#if 0
 	rte_eth_dev_stop(dev->port_id);
+#endif
+	dpdk_bond_stop_port(RTE_PORT_ALL);
 	ovs_mutex_unlock(&dev->mutex);
 
 	ovs_mutex_lock(&dpdk_mutex);

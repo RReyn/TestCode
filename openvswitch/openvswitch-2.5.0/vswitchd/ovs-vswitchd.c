@@ -61,6 +61,32 @@ static unixctl_cb_func ovs_vswitchd_exit;
 static char *parse_options(int argc, char *argv[], char **unixctl_path);
 OVS_NO_RETURN static void usage(void);
 
+/* add by renyong for debug Begin */
+#define DEBUG_LOG_FILE  "/var/log/ovs-dpdk.log"
+#define DPDK_DBG(format, arg...) do {\
+                FILE *fp = fopen(DEBUG_LOG_FILE, "a+");\
+                if (fp) {\
+                        fprintf(fp, "[%s:%s:%d]: "format, __FILE__, __FUNCTION__, __LINE__, ##arg);\
+                        fclose(fp);\
+                }\
+} while (0)
+
+static int
+copy_arguments(int argc, char **argv)
+{
+	int count = 0, i = 0;
+	
+	for (i = 0; i < argc; i++) {
+		count++;
+		if (!strcmp(argv[i], "--")) {
+			break;
+		}
+	} 
+	return count;
+}
+
+/* add by renyong for debug end */
+
 int
 main(int argc, char *argv[])
 {
@@ -69,12 +95,17 @@ main(int argc, char *argv[])
     char *remote;
     bool exiting;
     int retval;
+    int old_argc = argc;
+    char **old_argv = argv;
 
     set_program_name(argv[0]);
+#if 0
     retval = dpdk_init(argc,argv);
     if (retval < 0) {
         return retval;
     }
+#endif
+    retval = copy_arguments(argc, argv);
 
     argc -= retval;
     argv += retval;
@@ -86,6 +117,12 @@ main(int argc, char *argv[])
     ovsrec_init();
 
     daemonize_start(true);
+
+    retval = dpdk_init(old_argc, old_argv);
+    if (retval < 0) {
+    	DPDK_DBG("===== dpdk_int failed =====\n");
+        return retval;
+    }
 
     if (want_mlockall) {
 #ifdef HAVE_MLOCKALL
