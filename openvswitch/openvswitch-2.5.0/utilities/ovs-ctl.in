@@ -34,13 +34,16 @@ done
 removed_vports=""
 
 insert_mods () {
+### modify by renyong Begin ###############
     # Try loading openvswitch again.
-    action "Inserting openvswitch module" modprobe openvswitch
+#    action "Inserting openvswitch module" modprobe openvswitch
 
-    for vport in $removed_vports; do
-        # Don't treat failures to load vports as fatal error
-        action "Inserting $vport module" modprobe $vport || true
-    done
+#    for vport in $removed_vports; do
+#        # Don't treat failures to load vports as fatal error
+#        action "Inserting $vport module" modprobe $vport || true
+#    done
+### modify by renyong End###############
+    true
 }
 
 insert_mod_if_required () {
@@ -214,13 +217,22 @@ start_forwarding () {
             ulimit -n $MAXFD
         fi
 
-	    # Start ovs-vswitchd.
-	    set ovs-vswitchd unix:"$DB_SOCK"
-	    set "$@" -vconsole:emer -vsyslog:err -vfile:info
-	    if test X"$MLOCKALL" != Xno; then
-	        set "$@" --mlockall
-	    fi
-	    start_daemon "$OVS_VSWITCHD_PRIORITY" "$OVS_VSWITCHD_WRAPPER" "$@"
+	OVS_DPDK_CONF_FILE=/etc/ovs-dpdk.conf
+	# Start ovs-vswitchd.
+	if test -e $OVS_DPDK_CONF_FILE; then
+	    source $OVS_DPDK_CONF_FILE
+	fi
+	if test X"$OVS_DPDK_CONF" != X; then
+            set ovs-vswitchd $OVS_DPDK_CONF --
+            set "$@" unix:"$DB_SOCK"
+        else
+            set ovs-vswitchd unix:"$DB_SOCK"
+        fi
+	set "$@" -vconsole:emer -vsyslog:err -vfile:info
+	if test X"$MLOCKALL" != Xno; then
+	    set "$@" --mlockall
+	fi
+	start_daemon "$OVS_VSWITCHD_PRIORITY" "$OVS_VSWITCHD_WRAPPER" "$@"
     fi
 }
 
