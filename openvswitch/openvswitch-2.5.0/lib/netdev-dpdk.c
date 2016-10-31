@@ -164,12 +164,6 @@ static struct ovs_mutex nonpmd_mempool_mutex = OVS_MUTEX_INITIALIZER;
 #define RTE_PORT_CLOSED         (uint16_t)2
 #define RTE_PORT_HANDLING       (uint16_t)3
 
-struct queue_stats_mappings {
-	uint8_t port_id;
-	uint16_t queue_id;
-	uint8_t stats_counter_id;
-} __rte_cache_aligned;
-
 /**
  *  * The data structure associated with each port.
  *   */
@@ -188,8 +182,6 @@ struct rte_port {
 	void                    *fwd_ctx;   /**< Forwarding mode context */
 	uint64_t                rx_bad_ip_csum; /**< rx pkts with bad ip checksum  */
 	uint64_t                rx_bad_l4_csum; /**< rx pkts with bad l4 checksum */
-	uint8_t                 tx_queue_stats_mapping_enabled;
-	uint8_t                 rx_queue_stats_mapping_enabled;
 	volatile uint16_t        port_status;    /**< port started or not */
 	uint8_t                 need_reconfig;  /**< need reconfiguring port or not */
 	uint8_t                 need_reconfig_queues; /**< need reconfiguring queues or not */
@@ -201,7 +193,6 @@ struct rte_port {
 	uint32_t                mc_addr_nb; /**< nb. of addr. in mc_addr_pool */
 	uint8_t                 slave_flag; /**< bonding slave port */
 };
-
 
 #define DEBUG_LOG_FILE  "/var/log/ovs-dpdk.log"
 #define DPDK_DBG(format, arg...) do {\
@@ -289,18 +280,6 @@ int8_t rx_drop_en = RTE_PMD_PARAM_UNSET;
 int16_t tx_free_thresh = RTE_PMD_PARAM_UNSET;
 int16_t tx_rs_thresh = RTE_PMD_PARAM_UNSET;
 int32_t txq_flags = RTE_PMD_PARAM_UNSET;
-
-#define MAX_TX_QUEUE_STATS_MAPPINGS	1024 /* MAX_PORT of 32 @ 32 tx_queues/port */
-#define MAX_RX_QUEUE_STATS_MAPPINGS	4096 /* MAX_PORT of 32 @ 128 rx_queues/port */
-
-struct queue_stats_mappings tx_queue_stats_mappings_array[MAX_TX_QUEUE_STATS_MAPPINGS];
-struct queue_stats_mappings rx_queue_stats_mappings_array[MAX_RX_QUEUE_STATS_MAPPINGS];
-
-struct queue_stats_mappings *tx_queue_stats_mappings = tx_queue_stats_mappings_array;
-struct queue_stats_mappings *rx_queue_stats_mappings = rx_queue_stats_mappings_array;
-
-uint16_t nb_tx_queue_stats_mappings = 0;
-uint16_t nb_rx_queue_stats_mappings = 0;
 
 struct rte_eth_rxmode rx_mode = {
 	.max_rx_pkt_len = ETHER_MAX_LEN, /**< Default maximum frame length. */
@@ -487,7 +466,6 @@ dpdk_mp_get(int socket_id, int mtu) OVS_REQUIRES(dpdk_mutex)
     char mp_name[RTE_MEMPOOL_NAMESIZE];
     unsigned mp_size;
 
-    DPDK_DBG(">>>>socket_id: %d, mtu: %d<<<<\n", socket_id, mtu);
     LIST_FOR_EACH (dmp, list_node, &dpdk_mp_list) {
         if (dmp->socket_id == socket_id && dmp->mtu == mtu) {
 	    DPDK_DBG(">>>> find dmp in dpdk_mp_list<<<<\n");
@@ -507,7 +485,6 @@ dpdk_mp_get(int socket_id, int mtu) OVS_REQUIRES(dpdk_mutex)
                      dmp->mtu, dmp->socket_id, mp_size) < 0) {
             return NULL;
         }
-	DPDK_DBG("mp_name: %s\n", mp_name);
 
         dmp->mp = rte_mempool_create(mp_name, mp_size, MBUF_SIZE(mtu),
                                      MP_CACHE_SZ,
@@ -772,7 +749,7 @@ netdev_dpdk_init(struct netdev *netdev_, unsigned int port_no,
     netdev->port_id = port_no;
     netdev->type = type;
     if (type == DPDK_DEV_VHOST) {
-        netdev->flags |= NETDEV_UP;
+        netdev->flags |= NETDEV_UP; 
     } else {
         netdev->flags = 0;
     }
@@ -1011,6 +988,9 @@ netdev_dpdk_set_multiq(struct netdev *netdev_, unsigned int n_txq,
          * have not been created.  Restore the old numbers. */
         netdev->up.n_txq = old_txq;
         netdev->up.n_rxq = old_rxq;
+	/*add by renyong*/
+	err = dpdk_eth_dev_init(netdev);
+	/*add by renyong*/
     }
 
     netdev->txq_needs_locking = netdev->real_n_txq != netdev->up.n_txq;
@@ -1117,7 +1097,6 @@ dpdk_queue_flush__(struct netdev_dpdk *dev, int qid)
 
     while (nb_tx != txq->count) {
         uint32_t ret;
-
         ret = rte_eth_tx_burst(dev->port_id, qid, txq->burst_pkts + nb_tx,
                                txq->count - nb_tx);
         if (!ret) {
@@ -1535,7 +1514,6 @@ netdev_dpdk_eth_send(struct netdev *netdev, int qid,
                      struct dp_packet **pkts, int cnt, bool may_steal)
 {
     struct netdev_dpdk *dev = netdev_dpdk_cast(netdev);
-
     netdev_dpdk_send__(dev, qid, pkts, cnt, may_steal);
     return 0;
 }
@@ -1812,16 +1790,17 @@ static int
 netdev_dpdk_vhost_get_carrier(const struct netdev *netdev_, bool *carrier)
 {
     struct netdev_dpdk *dev = netdev_dpdk_cast(netdev_);
-    struct virtio_net *virtio_dev = netdev_dpdk_get_virtio(dev);
+//    struct virtio_net *virtio_dev = netdev_dpdk_get_virtio(dev);
 
     ovs_mutex_lock(&dev->mutex);
-
+#if 0
     if (is_vhost_running(virtio_dev)) {
         *carrier = 1;
     } else {
         *carrier = 0;
     }
-
+#endif
+    *carrier = 1;
     ovs_mutex_unlock(&dev->mutex);
 
     return 0;
@@ -2763,7 +2742,6 @@ dpdk_print_stats_details(struct ds *ds, uint8_t port_id)
 {
 	struct rte_eth_stats stats;
 	struct rte_port *port = &ports[port_id];
-	uint8_t i;
 
 	static const char *nic_stats_border = "########################";
 
@@ -2775,49 +2753,18 @@ dpdk_print_stats_details(struct ds *ds, uint8_t port_id)
 	rte_eth_stats_get(port_id, &stats);
 	ds_put_format(ds, "\n%s NIC statistics for port %-2d %s\n",
 	       nic_stats_border, port_id, nic_stats_border);
-
-	if ((!port->rx_queue_stats_mapping_enabled) && (!port->tx_queue_stats_mapping_enabled)) {
-		ds_put_format(ds, "  RX-packets: %-10"PRIu64" RX-missed: %-10"PRIu64" RX-bytes:  "
-		       "%-"PRIu64"\n",
-		       stats.ipackets, stats.imissed, stats.ibytes);
-		ds_put_format(ds, "  RX-errors: %-"PRIu64"\n", stats.ierrors);
-		ds_put_format(ds, "  RX-nombuf:  %-10"PRIu64"\n",
-		       stats.rx_nombuf);
-		ds_put_format(ds, "  TX-packets: %-10"PRIu64" TX-errors: %-10"PRIu64" TX-bytes:  "
-		       "%-"PRIu64"\n",
-		       stats.opackets, stats.oerrors, stats.obytes);
-	} else {
-		ds_put_format(ds, "  RX-packets:              %10"PRIu64"    RX-errors: %10"PRIu64
-		       "    RX-bytes: %10"PRIu64"\n",
-		       stats.ipackets, stats.ierrors, stats.ibytes);
-		ds_put_format(ds, "  RX-errors:  %10"PRIu64"\n", stats.ierrors);
-		ds_put_format(ds, "  RX-nombuf:               %10"PRIu64"\n",
-		       stats.rx_nombuf);
-		ds_put_format(ds, "  TX-packets:              %10"PRIu64"    TX-errors: %10"PRIu64
-		       "    TX-bytes: %10"PRIu64"\n",
-		       stats.opackets, stats.oerrors, stats.obytes);
-	}
-
-	if (port->rx_queue_stats_mapping_enabled) {
-		ds_put_format(ds, "\n");
-		for (i = 0; i < RTE_ETHDEV_QUEUE_STAT_CNTRS; i++) {
-			ds_put_format(ds, "  Stats reg %2d RX-packets: %10"PRIu64
-			       "    RX-errors: %10"PRIu64
-			       "    RX-bytes: %10"PRIu64"\n",
-			       i, stats.q_ipackets[i], stats.q_errors[i], stats.q_ibytes[i]);
-		}
-	}
-	if (port->tx_queue_stats_mapping_enabled) {
-		ds_put_format(ds, "\n");
-		for (i = 0; i < RTE_ETHDEV_QUEUE_STAT_CNTRS; i++) {
-			ds_put_format(ds, "  Stats reg %2d TX-packets: %10"PRIu64
-			       "                             TX-bytes: %10"PRIu64"\n",
-			       i, stats.q_opackets[i], stats.q_obytes[i]);
-		}
-	}
+	ds_put_format(ds, "  RX-packets: %-10"PRIu64" RX-missed: %-10"PRIu64" RX-bytes:  "
+			"%-"PRIu64"\n",
+			stats.ipackets, stats.imissed, stats.ibytes);
+	ds_put_format(ds, "  RX-errors: %-"PRIu64"\n", stats.ierrors);
+	ds_put_format(ds, "  RX-nombuf:  %-10"PRIu64"\n",
+			stats.rx_nombuf);
+	ds_put_format(ds, "  TX-packets: %-10"PRIu64" TX-errors: %-10"PRIu64" TX-bytes:  "
+			"%-"PRIu64"\n",
+			stats.opackets, stats.oerrors, stats.obytes);
 
 	ds_put_format(ds, "%s############################%s\n",
-	       nic_stats_border, nic_stats_border);
+			nic_stats_border, nic_stats_border);
 }
 
 static void
@@ -2981,6 +2928,7 @@ dpdkbond_unixctl_show_info(struct unixctl_conn *conn,
 	uint8_t port_id;
 	int retval = 0;
 	char *nic_info_border = "=======================";
+	
 
 	retval = dpdkbond_get_portid(dpdkbond, &port_id);
 	if (retval < 0) {
@@ -3111,6 +3059,7 @@ dpdkbond_unixctl_show_infos_all(struct unixctl_conn *conn,
 		int argc OVS_UNUSED, const char *argv[] OVS_UNUSED,
 		void *aux OVS_UNUSED)
 {
+		
 	struct ds ds = DS_EMPTY_INITIALIZER;
 	uint8_t pid;
 	
@@ -3126,6 +3075,7 @@ dpdkbond_unixctl_show_stats_all(struct unixctl_conn *conn,
 		int argc OVS_UNUSED, const char *argv[] OVS_UNUSED,
 		void *aux OVS_UNUSED)
 {
+		
 	struct ds ds = DS_EMPTY_INITIALIZER;
 	uint8_t pid;
 	
@@ -3154,24 +3104,6 @@ dpdkbond_init(void)
 	unixctl_command_register("dpdkb/show-stats-all", "", 
 			0, 0, dpdkbond_unixctl_show_stats_all, NULL);
 }
-
-#if 0
-/* Mbuf Pools */
-static inline void
-mbuf_poolname_build(unsigned int sock_id, char* mp_name, int name_size)
-{
-	snprintf(mp_name, name_size, "mbuf_pool_socket_%u", sock_id);
-}
-
-static inline struct rte_mempool *
-mbuf_pool_find(unsigned int sock_id)
-{
-	char pool_name[RTE_MEMPOOL_NAMESIZE];
-
-	mbuf_poolname_build(sock_id, pool_name, sizeof(pool_name));
-	return (rte_mempool_lookup((const char *)pool_name));
-}
-#endif
 
 static uint8_t
 find_next_port(uint8_t p, struct rte_port *ports, int size)
@@ -3226,82 +3158,6 @@ rxtx_port_config(struct rte_port *port)
 		port->tx_conf.txq_flags = txq_flags;
 }
 
-static int
-set_rx_queue_stats_mapping_registers(uint8_t port_id, struct rte_port *port)
-{
-	uint16_t i;
-	int diag;
-	uint8_t mapping_found = 0;
-
-	for (i = 0; i < nb_rx_queue_stats_mappings; i++) {
-		if ((rx_queue_stats_mappings[i].port_id == port_id) &&
-				(rx_queue_stats_mappings[i].queue_id < nb_rxq )) {
-			diag = rte_eth_dev_set_rx_queue_stats_mapping(port_id,
-					rx_queue_stats_mappings[i].queue_id,
-					rx_queue_stats_mappings[i].stats_counter_id);
-			if (diag != 0)
-				return diag;
-			mapping_found = 1;
-		}
-	}
-	if (mapping_found)
-		port->rx_queue_stats_mapping_enabled = 1;
-	return 0;
-}
-
-static int
-set_tx_queue_stats_mapping_registers(uint8_t port_id, struct rte_port *port)
-{
-	uint16_t i;
-	int diag;
-	uint8_t mapping_found = 0;
-
-	for (i = 0; i < nb_tx_queue_stats_mappings; i++) {
-		if ((tx_queue_stats_mappings[i].port_id == port_id) &&
-				(tx_queue_stats_mappings[i].queue_id < nb_txq )) {
-			diag = rte_eth_dev_set_tx_queue_stats_mapping(port_id,
-					tx_queue_stats_mappings[i].queue_id,
-					tx_queue_stats_mappings[i].stats_counter_id);
-			if (diag != 0)
-				return diag;
-			mapping_found = 1;
-		}
-	}
-	if (mapping_found)
-		port->tx_queue_stats_mapping_enabled = 1;
-	return 0;
-}
-
-static void
-map_port_queue_stats_mapping_registers(uint8_t pi, struct rte_port *port)
-{
-	int diag = 0;
-
-	diag = set_tx_queue_stats_mapping_registers(pi, port);
-	if (diag != 0) {
-		if (diag == -ENOTSUP) {
-			port->tx_queue_stats_mapping_enabled = 0;
-			DPDK_DBG("TX queue stats mapping not supported port id=%d\n", pi);
-		} else {
-			rte_exit(EXIT_FAILURE,
-				"set_tx_queue_stats_mapping_registers "
-				"failed for port id=%d diag=%d\n", pi, diag);
-		}
-	}
-
-	diag = set_rx_queue_stats_mapping_registers(pi, port);
-	if (diag != 0) {
-		if (diag == -ENOTSUP) {
-			port->rx_queue_stats_mapping_enabled = 0;
-			DPDK_DBG("RX queue stats mapping not supported port id=%d\n", pi);
-		} else {
-			rte_exit(EXIT_FAILURE,
-				"set_rx_queue_stats_mapping_registers "
-				"failed for port id=%d diag=%d\n", pi, diag);
-		}
-	}
-}
-
 static void
 init_port_config(void)
 {
@@ -3341,8 +3197,6 @@ init_port_config(void)
 		rxtx_port_config(port);
 
 		rte_eth_macaddr_get(pid, &port->eth_addr);
-
-		map_port_queue_stats_mapping_registers(pid, port);
 #ifdef RTE_NIC_BYPASS
 		rte_eth_dev_bypass_init(pid);
 #endif
@@ -3425,6 +3279,7 @@ dpdk_bond_device_create(char *bondname)
 	nb_ports = rte_eth_dev_count();
 	reconfig((uint8_t)portid, SOCKET0);
 	rte_eth_promiscuous_enable(portid);
+	rte_eth_allmulticast_enable(portid);
 	ports[portid].enabled = 1;
 
 	DPDK_DBG_FUNC_END();
@@ -3684,7 +3539,7 @@ dpdk_bond_create(const char *dev_name, unsigned int port_no,
 	bond->user_port_id = port_no;
 	bond->eth_port_id = portid;
 	list_push_back(&dpdk_bond_list, &bond->list_node);
-
+	
 	*eth_port_id = portid;
 	
 	DPDK_DBG_FUNC_END();
@@ -3813,6 +3668,8 @@ netdev_dpdk_bond_construct(struct netdev *netdev)
 	ovs_mutex_lock(&dpdk_mutex);
 	init_slave_port();
 
+	nb_txq = ovs_numa_get_n_cores();
+	nb_txq = nb_txq == (uint16_t)OVS_CORE_UNSPEC ? NR_QUEUE : nb_txq;
 	err = dpdk_bond_open(netdev->name, &port_no);
 	if (err) {
 		DPDK_DBG("dpdk_bond_open failed.\n");
@@ -3832,9 +3689,6 @@ netdev_dpdk_bond_destruct(struct netdev *netdev_ OVS_UNUSED)
 	struct netdev_dpdk *dev = netdev_dpdk_cast(netdev_);
 
 	ovs_mutex_lock(&dev->mutex);
-#if 0
-	rte_eth_dev_stop(dev->port_id);
-#endif
 	dpdk_bond_stop_port(RTE_PORT_ALL);
 	ovs_mutex_unlock(&dev->mutex);
 
@@ -3847,14 +3701,63 @@ netdev_dpdk_bond_destruct(struct netdev *netdev_ OVS_UNUSED)
 	DPDK_DBG_FUNC_END();
 }
 
+static int
+netdev_dpdk_bond_set_multiq(struct netdev *netdev_, unsigned int n_txq,
+                       unsigned int n_rxq)
+{
+	struct netdev_dpdk *netdev = netdev_dpdk_cast(netdev_);
+	int err = 0;
+	uint8_t portid;
+	struct rte_eth_dev_info info;
+	int old_rxq, old_txq;
+	int orig_txq = n_txq;
+
+	if (netdev->up.n_txq == n_txq && netdev->up.n_rxq == n_rxq) {
+		return err;
+	}
+
+	FOREACH_PORT(portid, ports) {
+		rte_eth_dev_info_get(portid, &info);	
+		n_txq = MIN(info.max_tx_queues, n_txq);
+		n_rxq = MIN(info.max_rx_queues, n_rxq);
+	}
+
+	ovs_mutex_lock(&dpdk_mutex);
+	ovs_mutex_lock(&netdev->mutex);
+	
+	rte_eth_dev_stop(netdev->port_id);
+	
+	old_txq = netdev->up.n_txq;
+	old_rxq = netdev->up.n_rxq;
+	netdev->up.n_txq = n_txq;
+	netdev->up.n_rxq = n_rxq;
+
+	rte_free(netdev->tx_q);	
+	netdev_dpdk_alloc_txq(netdev, netdev->real_n_txq);
+	err = dpdk_eth_dev_init(netdev);
+	if (err) {
+		/* If there has been an error, it means that the requested queues
+		 *          * have not been created.  Restore the old numbers. */
+		netdev->up.n_txq = old_txq;
+		netdev->up.n_rxq = old_rxq;
+	}
+
+//	netdev->txq_needs_locking = netdev->real_n_txq != netdev->up.n_txq;
+	netdev->txq_needs_locking = orig_txq != netdev->up.n_txq;
+
+	ovs_mutex_unlock(&netdev->mutex);
+	ovs_mutex_unlock(&dpdk_mutex);
+
+	return err;
+}
+
 static const struct netdev_class dpdk_bond_class =
     NETDEV_DPDK_CLASS(
         "dpdkb",
         NULL,
         netdev_dpdk_bond_construct,
         netdev_dpdk_bond_destruct,
-//        netdev_dpdk_set_multiq,
-	NULL,
+        netdev_dpdk_bond_set_multiq,
         netdev_dpdk_eth_send,
         netdev_dpdk_get_carrier,
         netdev_dpdk_get_stats,

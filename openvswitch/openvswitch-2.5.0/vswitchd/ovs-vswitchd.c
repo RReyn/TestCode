@@ -61,16 +61,7 @@ static unixctl_cb_func ovs_vswitchd_exit;
 static char *parse_options(int argc, char *argv[], char **unixctl_path);
 OVS_NO_RETURN static void usage(void);
 
-/* add by renyong for debug Begin */
-#define DEBUG_LOG_FILE  "/var/log/ovs-dpdk.log"
-#define DPDK_DBG(format, arg...) do {\
-                FILE *fp = fopen(DEBUG_LOG_FILE, "a+");\
-                if (fp) {\
-                        fprintf(fp, "[%s:%s:%d]: "format, __FILE__, __FUNCTION__, __LINE__, ##arg);\
-                        fclose(fp);\
-                }\
-} while (0)
-
+/* add by renyong Begin */
 static int
 copy_arguments(int argc, char **argv)
 {
@@ -85,7 +76,7 @@ copy_arguments(int argc, char **argv)
 	return count;
 }
 
-/* add by renyong for debug end */
+/* add by renyong end */
 
 int
 main(int argc, char *argv[])
@@ -120,7 +111,6 @@ main(int argc, char *argv[])
 
     retval = dpdk_init(old_argc, old_argv);
     if (retval < 0) {
-    	DPDK_DBG("===== dpdk_int failed =====\n");
         return retval;
     }
 
