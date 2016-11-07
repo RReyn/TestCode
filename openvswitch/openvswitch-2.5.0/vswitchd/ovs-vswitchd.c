@@ -67,7 +67,7 @@ copy_arguments(int argc, char **argv)
 {
 	int count = 0, i = 0;
 	
-	for (i = 0; i < argc; i++) {
+	for (i = 1; i < argc; i++) {
 		count++;
 		if (!strcmp(argv[i], "--")) {
 			break;
@@ -75,7 +75,6 @@ copy_arguments(int argc, char **argv)
 	} 
 	return count;
 }
-
 /* add by renyong end */
 
 int
