@@ -82,7 +82,7 @@ ovs_vsctl () {
 set_system_ids () {
     set ovs_vsctl set Open_vSwitch .
 
-    OVS_VERSION=`ovs-vswitchd --version | sed 's/.*) //;1q'`
+    OVS_VERSION=`ovs-vswitchd -- --version | sed 's/.*) //;1q'`
     set "$@" ovs-version="$OVS_VERSION"
 
     case $SYSTEM_ID in
