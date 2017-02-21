@@ -23,7 +23,13 @@ extern "C" {
 	})
 
 /* Memory barrier: FULL barrier */
-#define MB()	__sync_synchronize()
+#ifdef __KERNEL__ 
+#define mb() __asm__ __volatile__("": : :"memory")
+#else
+#define mb()	__sync_synchronize()
+#endif
+
+#define ARRAY_SIZE(x) ((sizeof(x)) / (sizeof((x)[0])))
 
 
 /**

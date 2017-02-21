@@ -50,16 +50,9 @@
  *   to lock the reader.
  */
 
-#ifdef __KERNEL__
-#include <linux/kernel.h>
-#include <linux/spinlock.h>
-#include <linux/stddef.h>
-#include <linux/scatterlist.h>
-#else
 #include <errno.h>
 #include "rte_common.h"
 #include "rte_spinlock.h"
-#endif
 
 struct __kfifo {
 	unsigned int	in;
@@ -335,18 +328,6 @@ __kfifo_uint_must_check_helper( \
  * Return 0 if no error, otherwise an error code.
  */
 
-#ifdef __KERNEL__
-#define kfifo_alloc(fifo, size, gfp_mask) \
-__kfifo_int_must_check_helper( \
-({ \
-	typeof((fifo) + 1) __tmp = (fifo); \
-	struct __kfifo *__kfifo = &__tmp->kfifo; \
-	__is_kfifo_ptr(__tmp) ? \
-	__kfifo_alloc(__kfifo, size, sizeof(*__tmp->type), gfp_mask) : \
-	-EINVAL; \
-}) \
-)
-#else
 #define kfifo_alloc(fifo, size) \
 __kfifo_int_must_check_helper( \
 ({ \
@@ -357,7 +338,6 @@ __kfifo_int_must_check_helper( \
 	-EINVAL; \
 }) \
 )
-#endif
 
 /*
  * kfifo_free - frees the fifo
@@ -421,7 +401,7 @@ __kfifo_int_must_check_helper( \
 			(__tmp->buf) \
 			)[__kfifo->in & __tmp->kfifo.mask] = \
 				(typeof(*__tmp->type))__val; \
-			smp_wmb(); \
+			mb(); \
 			__kfifo->in++; \
 		} \
 	} \
@@ -459,7 +439,7 @@ __kfifo_uint_must_check_helper( \
 				((typeof(__tmp->type))__kfifo->data) : \
 				(__tmp->buf) \
 				)[__kfifo->out & __tmp->kfifo.mask]; \
-			smp_wmb(); \
+			mb(); \
 			__kfifo->out++; \
 		} \
 	} \
@@ -498,7 +478,7 @@ __kfifo_uint_must_check_helper( \
 				((typeof(__tmp->type))__kfifo->data) : \
 				(__tmp->buf) \
 				)[__kfifo->out & __tmp->kfifo.mask]; \
-			smp_wmb(); \
+			mb(); \
 		} \
 	} \
 	__ret; \
@@ -539,17 +519,6 @@ __kfifo_uint_must_check_helper( \
  * This macro copies the given values buffer into the fifo and returns the
  * number of copied elements.
  **/
-#ifdef __KERNEL__
-#define	kfifo_in_spinlocked(fifo, buf, n, lock) \
-({ \
-	unsigned long __flags; \
-	unsigned int __ret; \
-	spin_lock_irqsave(lock, __flags); \
-	__ret = kfifo_in(fifo, buf, n); \
-	spin_unlock_irqrestore(lock, __flags); \
-	__ret; \
-})
-#else
 #define	kfifo_in_spinlocked(fifo, buf, n, lock) \
 ({ \
 	unsigned int __ret; \
@@ -558,7 +527,6 @@ __kfifo_uint_must_check_helper( \
 	rte_spinlock_unlock(lock); \
 	__ret; \
 })
-#endif
 
 /* alias for kfifo_in_spinlocked, will be removed in a future release */
 #define kfifo_in_locked(fifo, buf, n, lock) \
@@ -600,19 +568,6 @@ __kfifo_uint_must_check_helper( \
  * This macro get the data from the fifo and return the numbers of elements
  * copied.
  */
-#ifdef __KERNEL__
-#define	kfifo_out_spinlocked(fifo, buf, n, lock) \
-__kfifo_uint_must_check_helper( \
-({ \
-	unsigned long __flags; \
-	unsigned int __ret; \
-	spin_lock_irqsave(lock, __flags); \
-	__ret = kfifo_out(fifo, buf, n); \
-	spin_unlock_irqrestore(lock, __flags); \
-	__ret; \
-}) \
-)
-#else
 #define	kfifo_out_spinlocked(fifo, buf, n, lock) \
 __kfifo_uint_must_check_helper( \
 ({ \
@@ -623,167 +578,11 @@ __kfifo_uint_must_check_helper( \
 	__ret; \
 }) \
 )
-#endif
 
 /* alias for kfifo_out_spinlocked, will be removed in a future release */
 #define kfifo_out_locked(fifo, buf, n, lock) \
 		kfifo_out_spinlocked(fifo, buf, n, lock)
 
-/**
- * kfifo_from_user - puts some data from user space into the fifo
- * @fifo: address of the fifo to be used
- * @from: pointer to the data to be added
- * @len: the length of the data to be added
- * @copied: pointer to output variable to store the number of copied bytes
- *
- * This macro copies at most @len bytes from the @from into the
- * fifo, depending of the available space and returns -EFAULT/0.
- *
- * Note that with only one concurrent reader and one concurrent
- * writer, you don't need extra locking to use these macro.
- */
-#ifdef __KERNEL__
-#define	kfifo_from_user(fifo, from, len, copied) \
-__kfifo_uint_must_check_helper( \
-({ \
-	typeof((fifo) + 1) __tmp = (fifo); \
-	const void __user *__from = (from); \
-	unsigned int __len = (len); \
-	unsigned int *__copied = (copied); \
-	const size_t __recsize = sizeof(*__tmp->rectype); \
-	struct __kfifo *__kfifo = &__tmp->kfifo; \
-	(__recsize) ? \
-	__kfifo_from_user_r(__kfifo, __from, __len,  __copied, __recsize) : \
-	__kfifo_from_user(__kfifo, __from, __len, __copied); \
-}) \
-)
-/**
- * kfifo_to_user - copies data from the fifo into user space
- * @fifo: address of the fifo to be used
- * @to: where the data must be copied
- * @len: the size of the destination buffer
- * @copied: pointer to output variable to store the number of copied bytes
- *
- * This macro copies at most @len bytes from the fifo into the
- * @to buffer and returns -EFAULT/0.
- *
- * Note that with only one concurrent reader and one concurrent
- * writer, you don't need extra locking to use these macro.
- */
-#define	kfifo_to_user(fifo, to, len, copied) \
-__kfifo_uint_must_check_helper( \
-({ \
-	typeof((fifo) + 1) __tmp = (fifo); \
-	void __user *__to = (to); \
-	unsigned int __len = (len); \
-	unsigned int *__copied = (copied); \
-	const size_t __recsize = sizeof(*__tmp->rectype); \
-	struct __kfifo *__kfifo = &__tmp->kfifo; \
-	(__recsize) ? \
-	__kfifo_to_user_r(__kfifo, __to, __len, __copied, __recsize) : \
-	__kfifo_to_user(__kfifo, __to, __len, __copied); \
-}) \
-)
-/**
- * kfifo_dma_in_prepare - setup a scatterlist for DMA input
- * @fifo: address of the fifo to be used
- * @sgl: pointer to the scatterlist array
- * @nents: number of entries in the scatterlist array
- * @len: number of elements to transfer
- *
- * This macro fills a scatterlist for DMA input.
- * It returns the number entries in the scatterlist array.
- *
- * Note that with only one concurrent reader and one concurrent
- * writer, you don't need extra locking to use these macros.
- */
-#define	kfifo_dma_in_prepare(fifo, sgl, nents, len) \
-({ \
-	typeof((fifo) + 1) __tmp = (fifo); \
-	struct scatterlist *__sgl = (sgl); \
-	int __nents = (nents); \
-	unsigned int __len = (len); \
-	const size_t __recsize = sizeof(*__tmp->rectype); \
-	struct __kfifo *__kfifo = &__tmp->kfifo; \
-	(__recsize) ? \
-	__kfifo_dma_in_prepare_r(__kfifo, __sgl, __nents, __len, __recsize) : \
-	__kfifo_dma_in_prepare(__kfifo, __sgl, __nents, __len); \
-})
-
-/**
- * kfifo_dma_in_finish - finish a DMA IN operation
- * @fifo: address of the fifo to be used
- * @len: number of bytes to received
- *
- * This macro finish a DMA IN operation. The in counter will be updated by
- * the len parameter. No error checking will be done.
- *
- * Note that with only one concurrent reader and one concurrent
- * writer, you don't need extra locking to use these macros.
- **/
-#define kfifo_dma_in_finish(fifo, len) \
-(void)({ \
-	typeof((fifo) + 1) __tmp = (fifo); \
-	unsigned int __len = (len); \
-	const size_t __recsize = sizeof(*__tmp->rectype); \
-	struct __kfifo *__kfifo = &__tmp->kfifo; \
-	if (__recsize) \
-		__kfifo_dma_in_finish_r(__kfifo, __len, __recsize); \
-	else \
-		__kfifo->in += __len / sizeof(*__tmp->type); \
-})
-
-/**
- * kfifo_dma_out_prepare - setup a scatterlist for DMA output
- * @fifo: address of the fifo to be used
- * @sgl: pointer to the scatterlist array
- * @nents: number of entries in the scatterlist array
- * @len: number of elements to transfer
- *
- * This macro fills a scatterlist for DMA output which at most @len bytes
- * to transfer.
- * It returns the number entries in the scatterlist array.
- * A zero means there is no space available and the scatterlist is not filled.
- *
- * Note that with only one concurrent reader and one concurrent
- * writer, you don't need extra locking to use these macros.
- */
-#define	kfifo_dma_out_prepare(fifo, sgl, nents, len) \
-({ \
-	typeof((fifo) + 1) __tmp = (fifo);  \
-	struct scatterlist *__sgl = (sgl); \
-	int __nents = (nents); \
-	unsigned int __len = (len); \
-	const size_t __recsize = sizeof(*__tmp->rectype); \
-	struct __kfifo *__kfifo = &__tmp->kfifo; \
-	(__recsize) ? \
-	__kfifo_dma_out_prepare_r(__kfifo, __sgl, __nents, __len, __recsize) : \
-	__kfifo_dma_out_prepare(__kfifo, __sgl, __nents, __len); \
-})
-
-/**
- * kfifo_dma_out_finish - finish a DMA OUT operation
- * @fifo: address of the fifo to be used
- * @len: number of bytes transferred
- *
- * This macro finish a DMA OUT operation. The out counter will be updated by
- * the len parameter. No error checking will be done.
- *
- * Note that with only one concurrent reader and one concurrent
- * writer, you don't need extra locking to use these macros.
- */
-#define kfifo_dma_out_finish(fifo, len) \
-(void)({ \
-	typeof((fifo) + 1) __tmp = (fifo); \
-	unsigned int __len = (len); \
-	const size_t __recsize = sizeof(*__tmp->rectype); \
-	struct __kfifo *__kfifo = &__tmp->kfifo; \
-	if (__recsize) \
-		__kfifo_dma_out_finish_r(__kfifo, __recsize); \
-	else \
-		__kfifo->out += __len / sizeof(*__tmp->type); \
-})
-#endif
 /**
  * kfifo_out_peek - gets some data from the fifo
  * @fifo: address of the fifo to be used
@@ -810,13 +609,8 @@ __kfifo_uint_must_check_helper( \
 }) \
 )
 
-#ifdef __KERNEL__
-extern int __kfifo_alloc(struct __kfifo *fifo, unsigned int size,
-	size_t esize, gfp_t gfp_mask);
-#else
 extern int __kfifo_alloc(struct __kfifo *fifo, unsigned int size,
 	size_t esize);
-#endif
 
 extern void __kfifo_free(struct __kfifo *fifo);
 
@@ -828,19 +622,6 @@ extern unsigned int __kfifo_in(struct __kfifo *fifo,
 
 extern unsigned int __kfifo_out(struct __kfifo *fifo,
 	void *buf, unsigned int len);
-#ifdef __KERNEL__
-extern int __kfifo_from_user(struct __kfifo *fifo,
-	const void __user *from, unsigned long len, unsigned int *copied);
-
-extern int __kfifo_to_user(struct __kfifo *fifo,
-	void __user *to, unsigned long len, unsigned int *copied);
-
-extern unsigned int __kfifo_dma_in_prepare(struct __kfifo *fifo,
-	struct scatterlist *sgl, int nents, unsigned int len);
-
-extern unsigned int __kfifo_dma_out_prepare(struct __kfifo *fifo,
-	struct scatterlist *sgl, int nents, unsigned int len);
-#endif
 extern unsigned int __kfifo_out_peek(struct __kfifo *fifo,
 	void *buf, unsigned int len);
 
@@ -849,25 +630,6 @@ extern unsigned int __kfifo_in_r(struct __kfifo *fifo,
 
 extern unsigned int __kfifo_out_r(struct __kfifo *fifo,
 	void *buf, unsigned int len, size_t recsize);
-#ifdef __KERNEL__
-extern int __kfifo_from_user_r(struct __kfifo *fifo,
-	const void __user *from, unsigned long len, unsigned int *copied,
-	size_t recsize);
-
-extern int __kfifo_to_user_r(struct __kfifo *fifo, void __user *to,
-	unsigned long len, unsigned int *copied, size_t recsize);
-
-extern unsigned int __kfifo_dma_in_prepare_r(struct __kfifo *fifo,
-	struct scatterlist *sgl, int nents, unsigned int len, size_t recsize);
-
-extern void __kfifo_dma_in_finish_r(struct __kfifo *fifo,
-	unsigned int len, size_t recsize);
-
-extern unsigned int __kfifo_dma_out_prepare_r(struct __kfifo *fifo,
-	struct scatterlist *sgl, int nents, unsigned int len, size_t recsize);
-
-extern void __kfifo_dma_out_finish_r(struct __kfifo *fifo, size_t recsize);
-#endif
 extern unsigned int __kfifo_len_r(struct __kfifo *fifo, size_t recsize);
 
 extern void __kfifo_skip_r(struct __kfifo *fifo, size_t recsize);
