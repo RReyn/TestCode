@@ -26,7 +26,7 @@ function get_interface_bus_info()
 	local if_name=$1
 
 	if [ x"$if_name" == x"" ]; then
-		echo "InvalidArg"
+		echo "CKIF:InvalidArg"
 		return 2
 	fi
 	
@@ -43,7 +43,7 @@ function get_interface_nic_brand()
 	local brand=""
 
 	if [ x"$pci_num" == x"" ]; then
-		echo "InvalidArg"
+		echo "CKIF:InvalidArg"
 		return 2
 	fi
 
@@ -61,11 +61,11 @@ function main()
 	ret=$?
 	case $ret in
 		1)
-			echo "Non-exist"
+			echo "CKIF:Non-exist"
 			exit 0
 			;;
 		2)
-			echo "InvalidArg"
+			echo "CKIF:InvalidArg"
 			exit 1
 			;;
 	esac
@@ -73,17 +73,17 @@ function main()
 	local pci=`get_interface_bus_info $1`
 	ret=$?
 	if [ $ret -ne 0 ]; then
-		echo "InvalidArg"
+		echo "CKIF:InvalidArg"
 		exit 2
 	fi
 
 	local brand=`get_interface_nic_brand $pci`
 	ret=$?
 	if [ $ret -ne 0 ]; then
-		echo "InvalidArg"
+		echo "CKIF:InvalidArg"
 		exit 2
 	fi
-	echo "$brand"
+	echo "CKIF:$brand"
 	exit 0
 }
 ##################################
