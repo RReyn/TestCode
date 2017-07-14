@@ -1,10 +1,9 @@
 #!/bin/bash
 
-
 # return: 0 -- interface exist
 #	  1 -- interface doesn't exist
 #	  2 -- Invalid argument
-is_interface_exist()
+function is_interface_exist()
 {
 	local if_name=$1
 
@@ -21,8 +20,8 @@ is_interface_exist()
 	return 1
 }
 
-
-get_interface_bus_info()
+# get interface bus info from ethtool command
+function get_interface_bus_info()
 {
 	local if_name=$1
 
@@ -37,8 +36,8 @@ get_interface_bus_info()
 	return 0
 }
 
-
-get_interface_nic_brand()
+# get the brand of NIC from bus-info
+function get_interface_nic_brand()
 {
 	local pci_num=$1
 	local brand=""
@@ -54,7 +53,7 @@ get_interface_nic_brand()
 }
 
 # main function
-main()
+function main()
 {
 	local ifname=$1
 
