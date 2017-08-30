@@ -1,0 +1,40 @@
+#!/usr/bin/expect  -f
+
+#set time 180
+set timeout -1
+
+set domain [lindex $argv 0]
+set password [lindex $argv 1]
+
+spawn engine-setup --offline
+set time -1
+expect {
+	"*Configure Engine on this host*" {set timeout -1; send "\r"; exp_continue}
+	"*Configure Image I/O Proxy on this host?*" {set timeout -1; send "\r"; exp_continue}
+	"*Configure WebSocket Proxy on this host*" {set timeout -1; send "\r"; exp_continue}
+	"*Configure Data Warehouse on this host*" {set timeout -1; send "\r"; exp_continue}
+	"*Configure VM Console Proxy on this host*" {set timeout -1; send "\r"; exp_continue}
+	"*Host fully qualified DNS name of this server*" {set timeout -1; send "$domain\r"; exp_continue}
+	"*Do you want Setup to configure the firewall?*" {set timeout -1; send "\r"; exp_continue}
+	"*Firewall manager to configure*" {set timeout -1; send "firewalld\r"; exp_continue}
+	"*Where is the DWH database located?*" {set timeout -1; send "\r"; exp_continue}
+	"*Would you like Setup to automatically configure postgresql and create DWH database, or prefer to perform that manually?*" {set timeout -1; send "\r"; exp_continue}
+	"*Where is the Engine database located?*" {set timeout -1; send "\r"; exp_continue}
+	"*Would you like Setup to automatically configure postgresql and create Engine database, or prefer to perform that manually?*" {set timeout -1; send "\r"; exp_continue}
+	"*Engine admin password:" {set timeout -1; send "$password\r"; exp_continue}
+	"*Confirm engine admin password:" {set timeout -1; send "$password\r"; exp_continue}
+	"*Use weak password?*" {set timeout -1; send "Yes\r"; exp_continue}
+	"*Application mode*" {set timeout -1; send "\r"; exp_continue}
+	"*Default SAN wipe after delete*" {set timeout -1; send "\r"; exp_continue}
+	"*Organization name for certificate*" {set timeout -1; send "\r"; exp_continue}
+	"*Do you wish to set the application as the default page of the web server*" {set timeout -1; send "\r"; exp_continue}
+	"*Do you wish Setup to configure that, or prefer to perform that manually?*" {set timeout -1; send "\r"; exp_continue}
+	"*Configure an NFS share on this server to be used as an ISO Domain?*" {set timeout -1; send "Yes\r"; exp_continue}
+	"*Local ISO domain path*" {set timeout -1; send "\r"; exp_continue}
+	"*Local ISO domain ACL:" {set timeout -1; send "*(rw)\r"; exp_continue}
+	"*Local ISO domain name*" {set timeout -1; send "\r"; exp_continue}
+	"*(1, 2)*" {set timeout -1; send "\r"; exp_continue}
+	"*Please confirm installation settings*" {set timeout -1; send "\r"; exp_continue}
+	"*Would you like to backup the existing database before upgrading it*" {set timeout -1; send "\r"; exp_continue}
+}
+

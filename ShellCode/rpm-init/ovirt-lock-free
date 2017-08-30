@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+
+ovirt-aaa-jdbc-tool settings set --name='LOCK_MINUTES' --value='0'
