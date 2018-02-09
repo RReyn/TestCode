@@ -1,1 +1,1 @@
-# LeetCode上算法代码
+# LeetCode 算法代码
