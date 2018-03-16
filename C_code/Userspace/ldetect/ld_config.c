@@ -13,65 +13,6 @@
 #include "ld_send.h"
 
 ld_global_cfg_t global_cfg;
-#if 0
-static int
-get_os_interface(void)
-{
-	FILE *fp = NULL;
-	char buffer[BUF_LEN] = ""; 	
-	char *cmd = "grep ':' /proc/net/dev | awk -F':' '{print $1}'";
-	struct os_interface *os_if, *n;
-	char *tmp = NULL;
-	struct ifreq ifr;
-
-	fp = popen(cmd, "r");
-	if (fp == NULL)
-		return -1;
-	while (fgets(buffer, BUF_LEN, fp) != NULL) {
-		buffer[strlen(buffer) - 1] = '\0';
-		tmp = buffer;	
-		while (*tmp) {
-			if (isspace(*tmp)) {
-				tmp++;
-			} else {
-				break;
-			}
-		}
-		os_if = (struct os_interface *)malloc(sizeof(struct os_interface));
-		if (os_if == NULL) {
-			log_message(LOG_ERR, "Malloc os interface failed.");
-			goto out;
-		}
-		memset(os_if, 0, sizeof(struct os_interface));
-		INIT_LIST_HEAD(&os_if->node);
-		memcpy(os_if->eth_name, tmp, IF_NAME_LEN);
-		list_add(&os_if->node, &global_cfg.os_if_list);
-	}
-
-	return 0;
-out:
-	if (!list_empty(&global_cfg.os_if_list)) {
-		list_for_each_entry_safe(os_if, n,
-				&global_cfg.os_if_list, node) {
-			FREE(of_if);
-		}
-	}
-	return -1;
-}
-
-static int
-check_interface(const char *dev)
-{
-	struct os_interface *os_if = NULL;
-
-	list_for_each_entry(os_if, &global_cfg.os_if_list, node) {
-		if (!strcmp(os_if->eth_name, dev)) {
-			return 0;
-		}
-	}
-	return -1;
-}
-#endif
 
 static int
 check_ipaddr(const char *ipaddr)
@@ -238,137 +179,7 @@ handle_mgt_cfg(rte_json_t *item, void *arg)
 	return rte_handle_json(item, mgt_cfg_item,
 			ARRAY_SIZE(mgt_cfg_item), arg);
 }
-#if 0
-static int
-handle_if_eth_name(rte_json_t *item, void *arg)
-{
-	ld_if_t *if_cfg = (ld_if_t *)arg;
 
-	assert(if_cfg != NULL);
-
-	if (item->type != JSON_STRING) {
-		log_message(LOG_ERR, "Invalid json type of if_eth_name.");
-		return -1;
-	}
-
-	strncpy(if_cfg->eth_name, item->u.val_str, IF_NAME_LEN);
-
-	if (check_interface(if_cfg->eth_name) != 0) {
-		log_message(LOG_ERR,
-				"Invalid interface '%s'.", if_cfg->eth_name);
-		return -1;
-	}
-
-	return 0;
-}
-
-static int
-handle_if_ipaddr(rte_json_t *item, void *arg)
-{
-	ld_if_t *if_cfg = (ld_if_t *)arg;
-
-	assert(if_cfg != NULL);
-
-	if (item->type != JSON_STRING) {
-		log_message(LOG_ERR, "Invalid json type of if_ipaddr.");
-		return -1;
-	}
-
-	strncpy(if_cfg->ipaddr, item->u.val_str, IP_LEN);
-	if (check_ipaddr(if_cfg->ipaddr) != 0) {
-		log_message(LOG_ERR,
-				"Invalid ip address '%s'.", if_cfg->ipaddr);
-		return -1;
-	}
-	
-	return 0;
-}
-
-static int
-handle_if_prefix(rte_json_t *item, void *arg)
-{
-	ld_if_t *if_cfg = (ld_if_t *)arg;
-
-	assert(arg != NULL);
-
-	if (item->type != JSON_INTEGER) {
-		log_message(LOG_ERR, "Invalid json type of if_prefix.");
-		return -1;
-	}
-	if_cfg->prefix = item->u.val_int;
-	if (check_prefix(if_cfg->prefix) != 0) {
-		log_message(LOG_ERR, "Invalid prefix '%d'.", if_cfg->prefix);
-		return -1;
-	}
-	return 0;
-}
-
-static int
-handle_if_static_route(rte_json_t *item, void *arg)
-{
-	ld_if_t *if_cfg = (ld_if_t *)arg;
-
-	assert(if_cfg != NULL);
-
-	if (item->type != JSON_STRING) {
-		log_message(LOG_ERR, "Invalid json type of if_route.");
-		return -1;
-	}
-	strncpy(if_cfg->static_route, item->u.val_str, IP_LEN);
-	if (check_ipaddr(if_cfg->static_route) != 0) {
-		log_message(LOG_ERR, "Invalid ip address '%s'.",
-				if_cfg->static_route);
-		return -1;
-	}
-	return 0;
-}
-
-struct rte_handle_json_item if_cfg_item[] = {
-	{"eth_name", handle_if_eth_name},
-	{"ip_addr", handle_if_ipaddr},
-	{"prefix", handle_if_prefix},
-	{"static_route", handle_if_static_route}
-};
-
-static int
-handle_if_cfg(rte_json_t *item, void *arg)
-{
-	int if_cfg_num = 0;
-	int i = 0;
-	rte_json_t *entry = NULL;
-	ld_if_t *if_cfg = NULL;
-
-	if (item->type != JSON_ARRAY) {
-		log_message(LOG_ERR, "Invalid json type of if_cfg.");
-		return -1;
-	}
-
-	if_cfg_num = rte_array_get_size(item);
-
-	for (i = 0; i < if_cfg_num; i++) {
-		entry = rte_array_get_item(item, i);	
-		if (entry == NULL) {
-			log_message(LOG_ERR, "Failed to get item '%d'.", i);
-			return -1;
-		}
-		if_cfg = (ld_if_t *)malloc(sizeof(ld_if_t));
-		if (if_cfg == NULL) {
-			log_message(LOG_ERR, "Malloc interface config type error.");
-			return -1;
-		}
-		memset(if_cfg, 0, sizeof(ld_if_t));
-		INIT_LIST_HEAD(&if_cfg->node);
-		if (rte_handle_json(entry, if_cfg_item,
-				ARRAY_SIZE(if_cfg_item), (void *)if_cfg) != 0) {
-			log_message(LOG_ERR, "Parse interface config json error.");
-			FREE(if_cfg);
-			return -1;
-		}
-		list_add(&if_cfg->node, &global_cfg.ld_if_list);
-	}
-	return 0;
-}
-#endif
 static int
 handle_report_server_ip(rte_json_t *item, void *arg UNUSED)
 {
@@ -570,6 +381,7 @@ handle_detect_dst_port(rte_json_t *item, void *arg)
 
 	return 0;
 }
+
 #if 0
 static int
 handle_detect_dev_out(rte_json_t *item, void *arg)
@@ -979,10 +791,6 @@ static void
 ldetect_config_init(void)
 {
 	global_cfg.mgt.port = DEFAULT_LISTEN_PORT;
-#if 0	
-	INIT_LIST_HEAD(&global_cfg.os_if_list);	
-	INIT_LIST_HEAD(&global_cfg.ld_if_list);
-#endif
 	INIT_LIST_HEAD(&global_cfg.detect_list);
 	global_cfg.report.is_report = REPORT_IS_DISABLE;
 	global_cfg.detect_num = 0;
@@ -994,9 +802,6 @@ ldetect_init(void)
 	int ret = 0;
 
 	ldetect_config_init();
-#if 0	
-	get_os_interface();
-#endif
 	/* parse the json config file, and update the global_cfg */
 	ret = ld_parse_config();
 	if (ret != 0) {
