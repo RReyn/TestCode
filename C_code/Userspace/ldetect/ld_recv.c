@@ -11,341 +11,6 @@
 #include "ld_recv.h"
 
 static char *recv_buffer = NULL;
-#if 0
-static rte_json_t * 
-parse_json_wrapper(const char *buf)
-{
-	rte_json_t *json = NULL;
-
-	json = rte_parse_json(buf);	
-	if (json == NULL) {
-		log_message(LOG_ERR, "Failed to parse add if config msg.");
-		return NULL;
-	}
-	if (json->type != JSON_OBJECT) {
-		log_message(LOG_ERR, "Error json format.");
-		return NULL;
-	}
-	return json;
-}
-
-static rte_json_t *
-parse_json2item_wrapper(const char *buf, rte_json_t **json,  const char *arg)
-{
-	rte_json_t *item = NULL;
-
-	*json = parse_json_wrapper(buf);
-	if (*json == NULL)
-		return NULL;
-
-	item = rte_object_get_item(*json, arg);
-	if (item == NULL) {
-		log_message(LOG_ERR, "Failed to get if_cfg item.");
-		rte_destroy_json(*json);
-		return NULL;
-	}
-	return item;
-}
-
-static int
-parse_mgt_cfg_msg(int sock, int type, struct msg_hdr *msg)
-{
-	return 0;
-}
-
-static int
-parse_global_cfg_msg(int sock, int type,  struct msg_hdr *msg)
-{
-	return 0;
-}
-
-static ld_if_t *
-parse_json2ld_if(rte_json_t *entry)
-{
-	ld_if_t *if_cfg = NULL;	
-
-	if_cfg = (ld_if_t *)malloc(sizeof(ld_if_t));
-	if (if_cfg == NULL) {
-		log_message(LOG_ERR, "Malloc interface config error.");
-		return NULL;
-	}
-	memset(if_cfg, 0, sizeof(ld_if_t));
-	INIT_LIST_HEAD(&if_cfg->node);
-
-	if (rte_handle_json(entry, if_cfg_item,
-		ARRAY_SIZE(if_cfg_item), (void *)if_cfg) != 0) {
-		log_message(LOG_ERR, "parse interface config error.");
-		FREE(if_cfg);
-		return NULL;
-	}
-	return if_cfg;
-}
-
-static int
-parse_if_cfg_msg(int sock, int type, struct msg_hdr *msg)
-{
-	rte_json_t *json = NULL, *item = NULL, *entry = NULL;
-	int if_cfg_num = 0, i = 0;
-	ld_if_t *if_cfg = NULL, *if_cfg_tmp = NULL, *tmp = NULL;
-	int ret = 1;
-
-	item = parse_json2item_wrapper(msg->data, &json, "if_cfg");
-	if (item == NULL) {
-		return ret;
-	}
-	if (item->type != JSON_ARRAY) {
-		log_message(LOG_ERR, "Invalid json type of if_cfg.");
-		goto out;
-	}
-
-	if_cfg_num = rte_array_get_size(item);
-	for (i = 0; i < if_cfg_num; i++) {
-		entry = rte_array_get_item(item, i);
-		if (entry == NULL) {
-			log_message(LOG_ERR, "Failed to get item '%d'", i);
-			goto out;
-		}
-
-		if_cfg = parse_json2ld_if(entry);
-		if (if_cfg == NULL) {
-			goto out;
-		}
-		switch (type) {
-		case DEL_IF_CONFIG_TYPE:
-			list_for_each_entry_safe(if_cfg_tmp,
-					tmp, &global_cfg.ld_if_list, node) {
-				if (strncmp(if_cfg->eth_name,
-					if_cfg_tmp->eth_name, IF_NAME_LEN) == 0) {
-					list_del(&if_cfg_tmp->node);
-					FREE(if_cfg_tmp);
-				}
-			}
-			break;
-		case ADD_IF_CONFIG_TYPE:
-			list_add(&if_cfg->node, &global_cfg.ld_if_list);
-			break;
-		case MOD_IF_CONFIG_TYPE:
-			list_for_each_entry_safe(if_cfg_tmp,
-					tmp, &global_cfg.ld_if_list, node) {
-				if (strncmp(if_cfg->eth_name,
-					if_cfg_tmp->eth_name, IF_NAME_LEN) == 0) {
-					list_del(&if_cfg_tmp->node);
-					FREE(if_cfg_tmp);
-				}
-			}
-			list_add(&if_cfg->node, &global_cfg.ld_if_list);
-			break;
-		}
-	}
-	ret = 0;
-out:
-	rte_destroy_json(json);
-	return ret;
-}
-
-static int
-parse_del_all_if_cfg_msg(int sock, int type UNUSED, struct msg_hdr *msg)
-{
-	rte_json_t *json = NULL, *item = NULL;
-	int ret = 1, options = 0;
-	ld_if_t *if_cfg = NULL, *tmp = NULL;
-
-	item = parse_json2item_wrapper(msg->data, &json, "options");
-	if (item == NULL) {
-		return ret;
-	}
-
-	if (item->type != JSON_INTEGER) {
-		log_message(LOG_ERR, "Invalid json type of options");
-		goto out;
-	}
-
-	options = item->u.val_int;
-	if (options == 0) {
-		ret = 0;
-		goto out;
-	}
-
-	list_for_each_entry_safe(if_cfg, tmp, &global_cfg.ld_if_list, node) {
-		list_del(&if_cfg->node);
-		FREE(if_cfg);
-	}
-	ret = 0;
-
-out:
-	rte_destroy_json(json);
-	return ret;
-}
-#endif
-#if 0
-static int
-parse_mod_report_serv_cfg_msg(int sock,
-		int type UNUSED, struct msg_hdr *msg)
-{
-	rte_json_t *json = NULL, *item = NULL;
-	int ret = 1;
-	ld_report_cfg_t *report = NULL;
-
-	item = parse_json2item_wrapper(msg->data, &json, "report_cfg");
-	if (item == NULL) 
-		return ret;
-
-	if (item->type != JSON_OBJECT) {
-		log_message(LOG_ERR, "Invalid json type of report_cfg");
-		goto out;
-	}
-
-	report = (ld_report_cfg_t *)malloc(sizeof(ld_report_cfg_t));
-	if (report == NULL) {
-		log_message(LOG_ERR, "Alloc report struct failed.");
-		goto out;
-	}
-
-	ret = rte_handle_json(item, report_cfg_item,
-			ARRAY_SIZE(report_cfg_item), report);
-	if (ret < 0) {
-		ret = 1;
-		log_message(LOG_ERR, "handle report json failed.");
-		goto err;
-	}
-
-	strncpy(global_cfg.report.serv_addr, report.serv_addr, IP_LEN);
-	global_cfg.report.interval = report.interval;
-	global_cfg.report.udp_port = report.udp_port;
-	global_cfg.report.is_report = report.is_report;
-
-	ret = 0;
-err:
-	FREE(report);
-out:
-	rte_destroy_json(json);
-	return ret;
-}
-
-static int
-parse_able_report_cfg_msg(int sock,
-		int type UNUSED, struct msg_hdr *msg)
-{
-	rte_json_t *json = NULL, *item = NULL;
-	int ret =1;
-	int options = 0;
-
-	item = parse_json2item_wrapper(msg->data, &json, "options");
-	if (item == NULL) {
-		return ret;
-	}
-	if (item->type != JSON_INTEGER) {
-		log_message("Invlaid json type of options.");
-		goto out;
-	}
-
-	options = item->u.val_int;
-	global_cfg.report.is_report = options;
-
-	ret = 0;
-out:
-	rte_destroy_json(json);
-	return ret;
-}
-
-static ld_detect_t *
-parse_json2ld_detect(rte_json_t *entry)
-{
-	ld_detect_t *detect = NULL;	
-
-	detect = (ld_detect_t *)malloc(sizeof(ld_detect_t));
-	if (detect == NULL) {
-		log_message(LOG_ERR, "Alloc detect config error.");
-		return NULL;
-	}
-	memset(detect, 0, sizeof(ld_detect_t));
-	INIT_LIST_HEAD(&detect->node);
-
-	if (rte_handle_json(entry, detect_list_item,
-		ARRAY_SIZE(detect_list_item), (void *)detect) != 0) {
-		log_message(LOG_INFO, "parse detect config error.");
-		FREE(detect);
-		return NULL;
-	}
-	return detect;
-}
-
-static int
-parse_detect_cfg_msg(int sock, int type, struct msg_hdr *msg)
-{
-	int ret = 1;
-	rte_json_t *json = NULL, *item = NULL, *entry = NULL;
-	int detect_num = 0, i = 0;
-	ld_detect_t *detect = NULL, *detect_node = NULL, *tmp = NULL;
-
-	item = parse_json2item_wrapper(msg->data, &json, "detect_list");
-	if (item == NULL)
-		return ret;
-
-	if (item->type != JSON_ARRAY) {
-		log_message(LOG_INFO, "Invalid json type of detect_list.");
-		goto out;
-	}
-
-	detect_num = rte_array_get_size(item);
-
-	for (i = 0; i < detect_num; i++) {
-		entry = rte_array_get_item(item, i);			
-		if (entry == NULL) {
-			log_message(LOG_INFO, "Failed to get item '%d'", i);
-			goto out;
-		}
-		detect = parse_json2ld_detect(entry);
-		if (detect == NULL) {
-			goto out;
-		}
-		switch (type) {
-		case ADD_DETECT_CONFIG_TYPE:	
-			list_for_each_entry(detect_node,
-					&global_cfg.detect_list, node) {
-				if (detect->cfg.id == detect_node->cfg.id) {
-					log_message(LOG_INFO,
-						"detect id '%d' exist.", detect->cfg.id);
-					FREE(detect);
-					break;
-				}
-			}
-			list_add(&detect->node, &global_cfg.detect_list);
-			/* init the detect node and create the thread */
-			detect_node_entry_init(detect);
-			break;
-		case MOD_DETECT_CONFIG_TYPE:			
-			list_for_each_entry_safe(detect_node, tmp,
-					&global_cfg.detect_list, node) {
-				if (detect->cfg.id == detect_node->cfg.id) {
-					/* cancle all the old detect thread */
-					detect_node_thread_cancle(detect_node);
-					list_del(&detect_node->node);
-					FREE(detect_node);
-				}
-			}
-			list_add(&detect->node, &global_cfg.detect_list);
-			/* init the detect node and create the thread */
-			detect_node_entry_init(detect);
-			break;
-		case DEL_DETECT_CONFIG_TYPE:
-			list_for_each_entry_safe(detect_node, tmp,
-					&global_cfg.detect_list, node) {
-				if (detect->cfg.id == detect_node->cfg.id) {
-					list_del(&detect_node->node);
-					FREE(detect_node);
-				}
-			}
-			FREE(detect);
-			break;
-		}
-	}
-	ret = 0;
-out:
-	rte_destroy_json(json);
-	return ret;
-}
-#endif
 
 static int
 response_config_msg(int sock, int ret_value, void *arg UNUSED)
@@ -395,12 +60,6 @@ static struct msg_handler msg_handler[] = {
 	{MOD_MGT_CONFIG_TYPE, parse_mgt_cfg_msg, response_config_msg},
 	{ADD_GLOBAL_CONFIG_TYPE, parse_global_cfg_msg, response_config_msg},
 	{DEL_GLOBAL_CONFIG_TYPE, parse_global_cfg_msg, response_config_msg},
-#if 0	
-	{ADD_IF_CONFIG_TYPE, parse_if_cfg_msg, response_config_msg},
-	{MOD_IF_CONFIG_TYPE, parse_if_cfg_msg, response_config_msg},
-	{DEL_IF_CONFIG_TYPE, parse_if_cfg_msg, response_config_msg},
-	{DEL_ALL_IF_CONFIG_TYPE, parse_del_all_if_cfg_msg, response_config_msg},
-#endif	
 	{MOD_REPORT_SERV_CONFIG_TYPE, parse_mod_report_serv_cfg_msg, response_config_msg},
 	{ENABLE_REPORT_CONFIG_TYPE, parse_able_report_cfg_msg, response_config_msg},
 	{DISABLE_REPORT_CONFIG_TYPE, parse_able_report_cfg_msg, response_config_msg},
@@ -475,9 +134,6 @@ ldetect_parse_msg(thread_t *thread)
 	int read_len = 0;
 	struct msg_hdr *msg = NULL;
 	int ret = 0, i = 0;
-#if 0
-	unsigned long timeout = 1;
-#endif
 
 	log_message(LOG_INFO, "In function '%', socket=%d.",
 			__FUNCTION__, sock);
@@ -526,9 +182,6 @@ ldetect_listen_func(thread_t *thread)
 	int accept_sock;
 	int client_len;
 	struct sockaddr_in client;
-#if 0
-	unsigned long time_out = 1;
-#endif
 
 	memset(&client, 0, sizeof(client));
 	client_len = sizeof(client);
@@ -551,9 +204,6 @@ cfg_recv_init(void)
 {
 	int sock = -1;
 	struct sockaddr_in serv;
-#if 0
-	unsigned long timeout = 1;
-#endif
 
 	sock = socket(AF_INET, SOCK_STREAM, 0);
 	if (sock < 0) {
@@ -598,7 +248,6 @@ icmp_recv_parse_func(thread_t *thread)
 
 	if (recvfrom(sock, recv_buffer, MAX_RECV_LEN, 0,
 			(struct sockaddr *)&from, &from_len) < 0) {
-//		log_message(LOG_INFO, "icmp recv failed.");
 		goto out;
 	}
 	iph = (struct iphdr *)recv_buffer;
