@@ -1,21 +1,3 @@
-#if 0
-#include "config.h"
-
-
-/* SNMP should be included first: it redefines "FREE" */
-#ifdef _WITH_SNMP_
-#include <net-snmp/net-snmp-config.h>
-#include <net-snmp/net-snmp-includes.h>
-#include <net-snmp/agent/net-snmp-agent-includes.h>
-#include <net-snmp/agent/snmp_vars.h>
-#undef FREE
-#endif
-
-#ifndef _DEBUG_
-#define NDEBUG
-#endif
-#endif
-
 #include <assert.h>
 #include <signal.h>
 #include <sys/wait.h>
