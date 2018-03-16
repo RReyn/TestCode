@@ -171,27 +171,6 @@ icmp_send_thread_init(int *sd, ld_detect_t *node)
 	
 	return 0;
 }
-#if 0
-static int
-icmp_timeout_func(thread_t *thread)
-{
-	ld_detect_t *detect = THREAD_ARG(thread);
-	unsigned long timeout = detect->cfg.retry_times * detect->cfg.interval;
-
-	/* timeout options */
-
-	thread_add_timer(thread->master, icmp_timeout_func, detect, timeout);
-	return 0;
-}
-
-static int
-icmp_timeout_thread_init(ld_detect_t *node)
-{
-	node->detect_node.timeout = thread_add_timer(master,
-		icmp_timeout_func, node, node->cfg.interval * node->cfg.retry_times);
-	return 0;
-}
-#endif
 
 static int
 icmp_detect_node_entry_init(ld_detect_t *node)
