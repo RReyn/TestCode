@@ -117,11 +117,7 @@ icmp_send_func(thread_t *thread)
 	ld_detect_t *detect = THREAD_ARG(thread);
 	struct sockaddr_in dst_addr;
 	ssize_t send_len = sizeof(struct iphdr) + sizeof(struct icmphdr);
-	unsigned long timer;
 	struct iphdr *iph = (struct iphdr *)(send_buffer);
-#if 0
-	struct icmphdr *icmp = (struct icmphdr *)(send_buffer + sizeof(struct iphdr));
-#endif
 	char *icmphdr = send_buffer + sizeof(struct iphdr);
 
 	log_message(LOG_INFO, ">>>> Begin of [%s:%d]<<<<.", __FUNCTION__, __LINE__);	
@@ -141,8 +137,6 @@ icmp_send_func(thread_t *thread)
 		log_message(LOG_INFO, "Sendto error.");
 		goto out;
 	}
-	timer = detect->cfg.interval * detect->cfg.retry_times;
-	thread_mod_timer(detect->detect_node.timeout, timer);
 out:
 	log_message(LOG_INFO, ">>>> End of [%s:%d]<<<<.", __FUNCTION__, __LINE__);	
 	thread_add_timer(thread->master,
@@ -154,8 +148,10 @@ static int
 icmp_timeout_func(thread_t *thread)
 {
 	ld_detect_t *detect = THREAD_ARG(thread);
+	unsigned long timer = detect->cfg.interval * detect->cfg.retry_times * TIMER_HZ;
 
 	detect->status = 1;
+	thread_add_timer(thread->master, icmp_timeout_func, detect, timer);
 	return 0;
 }
 
@@ -218,7 +214,9 @@ udp_send_func(thread_t *thread)
 	ld_detect_t *detect = THREAD_ARG(thread);
 	struct sockaddr_in dst_addr;
 	ssize_t send_len = sizeof(struct iphdr) + sizeof(struct udphdr);
+#if 0
 	unsigned long timer;
+#endif
 	struct iphdr *iph = (struct iphdr *)(send_buffer);
 	char *udphdr = send_buffer + sizeof(struct iphdr);
 
@@ -240,8 +238,10 @@ udp_send_func(thread_t *thread)
 		log_message(LOG_INFO, "Sendto error.");
 		goto out;
 	}
+#if 0
 	timer = detect->cfg.interval * detect->cfg.retry_times;
 	thread_mod_timer(detect->detect_node.timeout, timer);
+#endif
 out:
 	log_message(LOG_INFO, ">>>> End of [%s:%d]. <<<<", __FUNCTION__, __LINE__);
 	thread_add_timer(thread->master,
@@ -253,9 +253,13 @@ static int
 udp_timeout_func(thread_t *thread)
 {
 	ld_detect_t *detect = THREAD_ARG(thread);
+	unsigned long timer = detect->cfg.interval * detect->cfg.retry_times * TIMER_HZ;
+
 	log_message(LOG_INFO, ">>>> Begin of [%s:%d]<<<<.", __FUNCTION__, __LINE__);	
 	detect->status = 1;
 	log_message(LOG_INFO, ">>>> End of [%s:%d]<<<<.", __FUNCTION__, __LINE__);	
+
+	thread_add_timer(thread->master, udp_timeout_func, detect, timer);
 	return 0;
 }
 

@@ -279,7 +279,7 @@ udp_read_func(thread_t *thread)
 				srcip, ntohs(udp->source), dstip, ntohs(udp->dest));
 	}
 out:
-	thread_add_read(thread->master, udp_read_func, NULL, sock, TIMER_NEVER);
+	thread_add_read(thread->master, udp_read_func, node, sock, TIMER_NEVER);
 	return 0;
 }
 
