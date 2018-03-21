@@ -4,10 +4,12 @@
 #include <list.h>
 #include <assert.h>
 #include <netinet/ip_icmp.h>
+#include <netinet/udp.h>
 
 #include "common.h"
 #include "ld_config.h"
 #include "ld_send.h"
+#include "ld_recv.h"
 #include "log.h"
 #include "io_wrapper.h"
 
@@ -117,9 +119,12 @@ icmp_send_func(thread_t *thread)
 	ssize_t send_len = sizeof(struct iphdr) + sizeof(struct icmphdr);
 	unsigned long timer;
 	struct iphdr *iph = (struct iphdr *)(send_buffer);
+#if 0
 	struct icmphdr *icmp = (struct icmphdr *)(send_buffer + sizeof(struct iphdr));
+#endif
 	char *icmphdr = send_buffer + sizeof(struct iphdr);
 
+	log_message(LOG_INFO, ">>>> Begin of [%s:%d]<<<<.", __FUNCTION__, __LINE__);	
 	memset(send_buffer, 0, MAX_SEND_LEN);
 
 	detect_build_ip4(detect, (char *)iph,
@@ -139,6 +144,7 @@ icmp_send_func(thread_t *thread)
 	timer = detect->cfg.interval * detect->cfg.retry_times;
 	thread_mod_timer(detect->detect_node.timeout, timer);
 out:
+	log_message(LOG_INFO, ">>>> End of [%s:%d]<<<<.", __FUNCTION__, __LINE__);	
 	thread_add_timer(thread->master,
 			icmp_send_func, detect, detect->cfg.interval * TIMER_HZ);
 	return 0;
@@ -165,9 +171,9 @@ icmp_send_thread_init(int *sd, ld_detect_t *node)
 	node->detect_node.write = thread_add_timer(master,
 		icmp_send_func, node, node->cfg.interval * TIMER_HZ);
 
-	timer = node->cfg.interval * node->cfg.retry_times;
+	timer = node->cfg.interval * node->cfg.retry_times * TIMER_HZ;
 	node->detect_node.timeout = thread_add_timer(master,
-		icmp_timeout_func, node, timer * TIMER_HZ);
+		icmp_timeout_func, node, timer);
 	
 	return 0;
 }
@@ -185,38 +191,94 @@ icmp_detect_node_entry_init(ld_detect_t *node)
 
 	return 0;
 }
-
-static int
-tcp_detect_node_entry_init(ld_detect_t *node)
-{
-	return 0;
-}
-
+#if 0
 static int
 udp_read_func(thread_t *thread)
 {
 	return 0;
 }
+#endif
+
+static void
+detect_build_udp(ld_detect_t *detect, char *buffer)
+{
+	struct udphdr *udp = (struct udphdr *)buffer;
+
+	udp->source = htons(detect->cfg.src_port);
+	udp->dest = htons(detect->cfg.dst_port);
+	udp->len = htons(8); /* no data just iphdr + udphdr  */
+	udp->check = 0;
+	udp->check = in_csum((uint16_t *)udp, sizeof(struct udphdr), 0, NULL);
+}
 
 static int
 udp_send_func(thread_t *thread)
 {
+	int ret = -1;
+	ld_detect_t *detect = THREAD_ARG(thread);
+	struct sockaddr_in dst_addr;
+	ssize_t send_len = sizeof(struct iphdr) + sizeof(struct udphdr);
+	unsigned long timer;
+	struct iphdr *iph = (struct iphdr *)(send_buffer);
+	char *udphdr = send_buffer + sizeof(struct iphdr);
+
+	log_message(LOG_INFO, ">>>> Begin of [%s:%d]. <<<<", __FUNCTION__, __LINE__);
+	memset(send_buffer, 0, MAX_SEND_LEN);
+
+	detect_build_ip4(detect, (char *)iph,
+			IPPROTO_UDP, sizeof(struct udphdr));
+	detect_build_udp(detect, udphdr);
+
+	memset(&dst_addr, 0, sizeof(struct sockaddr_in));
+	dst_addr.sin_family = AF_INET;
+	dst_addr.sin_port = htons(detect->cfg.dst_port);
+	dst_addr.sin_addr.s_addr = inet_addr(detect->cfg.dst_ip);
+
+	ret = sendto(detect->detect_node.fd_out, send_buffer, send_len, 0,
+		(struct sockaddr *)&dst_addr, sizeof(struct sockaddr));
+	if (ret != send_len) {
+		log_message(LOG_INFO, "Sendto error.");
+		goto out;
+	}
+	timer = detect->cfg.interval * detect->cfg.retry_times;
+	thread_mod_timer(detect->detect_node.timeout, timer);
+out:
+	log_message(LOG_INFO, ">>>> End of [%s:%d]. <<<<", __FUNCTION__, __LINE__);
+	thread_add_timer(thread->master,
+			udp_send_func, detect, detect->cfg.interval * TIMER_HZ);
 	return 0;
 }
 
 static int
 udp_timeout_func(thread_t *thread)
 {
+	ld_detect_t *detect = THREAD_ARG(thread);
+	log_message(LOG_INFO, ">>>> Begin of [%s:%d]<<<<.", __FUNCTION__, __LINE__);	
+	detect->status = 1;
+	log_message(LOG_INFO, ">>>> End of [%s:%d]<<<<.", __FUNCTION__, __LINE__);	
 	return 0;
 }
 
 static int
 udp_read_thread_init(int *sd, ld_detect_t *node)
 {
+	struct sockaddr_in serv_addr;
+
 	if (*sd < 0)
 		return -1;
 
 	node->detect_node.fd_in = *sd;
+
+	memset(&serv_addr, 0, sizeof(serv_addr));
+	serv_addr.sin_family = AF_INET;
+	serv_addr.sin_port = htons(node->cfg.src_port);
+	serv_addr.sin_addr.s_addr = inet_addr(node->cfg.src_ip);
+
+	if (bind(*sd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+		log_message(LOG_INFO, "Init '%d' udp list error.",
+				node->cfg.id);
+		return -1;
+	}
 	node->detect_node.read = thread_add_read(master,
 			udp_read_func, node, *sd, TIMER_NEVER);
 	return 0;
@@ -225,6 +287,18 @@ udp_read_thread_init(int *sd, ld_detect_t *node)
 static int
 udp_send_thread_init(int *sd, ld_detect_t *node)
 {
+	unsigned long timer = 0;
+
+	if (*sd < 0)
+		return -1;
+
+	node->detect_node.fd_out = *sd;
+	node->detect_node.write = thread_add_timer(master, udp_send_func,
+			node, node->cfg.interval * TIMER_HZ);
+
+	timer = node->cfg.interval * node->cfg.retry_times * TIMER_HZ;
+	node->detect_node.timeout = thread_add_timer(master, udp_timeout_func,
+			node, timer);
 	return 0;
 }
 
@@ -240,8 +314,14 @@ udp_detect_node_entry_init(ld_detect_t *node)
 		return -1;
 
 	udp_read_thread_init(&fd_in, node);
-	udp_send_thread_init(&fd_in, node);
+	udp_send_thread_init(&fd_out, node);
 
+	return 0;
+}
+
+static int
+tcp_detect_node_entry_init(ld_detect_t *node)
+{
 	return 0;
 }
 
