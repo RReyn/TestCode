@@ -18,6 +18,7 @@ enum {
 };
 
 extern void recv_thread_init(void);
+extern int udp_read_func(thread_t *thread);
 
 #ifdef __cplusplus
 }
