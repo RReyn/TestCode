@@ -196,15 +196,18 @@ udp_read_func(thread_t *thread)
 #endif
 
 static void
-detect_build_udp(ld_detect_t *detect, char *buffer)
+detect_build_udp(ld_detect_t *detect, char *buffer, size_t len)
 {
 	struct udphdr *udp = (struct udphdr *)buffer;
 
 	udp->source = htons(detect->cfg.src_port);
 	udp->dest = htons(detect->cfg.dst_port);
-	udp->len = htons(8); /* no data just iphdr + udphdr  */
+	udp->len = htons(len); /* no data just iphdr + udphdr  */
 	udp->check = 0;
+#if 0
 	udp->check = in_csum((uint16_t *)udp, sizeof(struct udphdr), 0, NULL);
+#endif
+	udp->check = in_csum((uint16_t *)udp, len, 0, NULL);
 }
 
 static int
@@ -213,19 +216,18 @@ udp_send_func(thread_t *thread)
 	int ret = -1;
 	ld_detect_t *detect = THREAD_ARG(thread);
 	struct sockaddr_in dst_addr;
-	ssize_t send_len = sizeof(struct iphdr) + sizeof(struct udphdr);
-#if 0
-	unsigned long timer;
-#endif
+	ssize_t send_len = sizeof(struct iphdr) + sizeof(struct udphdr) + 16;
 	struct iphdr *iph = (struct iphdr *)(send_buffer);
 	char *udphdr = send_buffer + sizeof(struct iphdr);
+	char *data = send_buffer + sizeof(struct iphdr) + sizeof(struct udphdr);
 
 	log_message(LOG_INFO, ">>>> Begin of [%s:%d]. <<<<", __FUNCTION__, __LINE__);
 	memset(send_buffer, 0, MAX_SEND_LEN);
 
 	detect_build_ip4(detect, (char *)iph,
 			IPPROTO_UDP, sizeof(struct udphdr));
-	detect_build_udp(detect, udphdr);
+	detect_build_udp(detect, udphdr, sizeof(struct udphdr) + IP_LEN);
+	memset(data, 'a', 16);
 
 	memset(&dst_addr, 0, sizeof(struct sockaddr_in));
 	dst_addr.sin_family = AF_INET;
@@ -238,10 +240,6 @@ udp_send_func(thread_t *thread)
 		log_message(LOG_INFO, "Sendto error.");
 		goto out;
 	}
-#if 0
-	timer = detect->cfg.interval * detect->cfg.retry_times;
-	thread_mod_timer(detect->detect_node.timeout, timer);
-#endif
 out:
 	log_message(LOG_INFO, ">>>> End of [%s:%d]. <<<<", __FUNCTION__, __LINE__);
 	thread_add_timer(thread->master,
