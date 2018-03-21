@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <netinet/in.h>
+#include <fcntl.h>
 
 #include "common.h"
 #include "log.h"
@@ -52,6 +53,21 @@ writen(int fd, void *usrbuf, size_t n)
 		bufp += nwritten;
 	}
 	return n;
+}
+
+int
+set_fd_nonblock(int fd)
+{
+	int flags = -1;	
+
+	flags = fcntl(fd, F_GETFL, 0);
+	if (flags < 0) {
+		return -1;
+	}
+	if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+		return -1;
+	}
+	return 0;
 }
 
 static int
