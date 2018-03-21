@@ -12,7 +12,6 @@ TARGET_OBJECTS = ld_config.o \
 		 ld_recv.o \
 		 ld_report.o \
 		 ld_send.o \
-		 ld_timeout.o \
 		 ldetect.o
 all: libdetect.so ldetect
 
