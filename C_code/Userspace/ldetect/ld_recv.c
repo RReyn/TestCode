@@ -2,6 +2,7 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <netinet/ip_icmp.h>
+#include <netinet/udp.h>
 
 #include "common.h"
 #include "io_wrapper.h"
@@ -232,6 +233,56 @@ out:
 	return -1;
 }
 
+int
+udp_read_func(thread_t *thread)
+{
+	int sock = THREAD_FD(thread);
+	ld_detect_t *node = THREAD_ARG(thread);
+	struct sockaddr_in from;
+	socklen_t from_len = sizeof(from);
+	struct iphdr *iph = NULL;
+	struct udphdr *udp = NULL;
+	char srcip[IP_LEN], dstip[IP_LEN];
+	struct in_addr src_ip, dst_ip;
+	unsigned long timer = 0;
+
+	memset(recv_buffer, 0, MAX_RECV_LEN);
+
+	if (recvfrom(sock, recv_buffer, MAX_RECV_LEN, 0,
+			(struct sockaddr *)&from, &from_len) < 0) {
+		goto out;
+	}
+	iph = (struct iphdr *)recv_buffer;
+	if (iph->protocol != IPPROTO_UDP) {
+		log_message(LOG_INFO, "Not udp message, receive message proto=%d.",
+				iph->protocol);
+		goto out;
+	}
+	udp = (struct udphdr *)(recv_buffer + sizeof(struct iphdr));
+#if 0
+	memcpy(&recv_ip, &iph->saddr, sizeof(recv_ip));
+	memcpy(src_ip, inet_ntoa(recv_ip), sizeof(src_ip));
+#endif
+	memcpy(&src_ip, &iph->saddr, sizeof(src_ip));
+	memcpy(srcip, inet_ntoa(src_ip), sizeof(srcip));
+	memcpy(&dst_ip, &iph->saddr, sizeof(dst_ip));
+	memcpy(dstip, inet_ntoa(dst_ip), sizeof(dstip));
+	if (!strncmp(srcip, node->cfg.dst_ip, IP_LEN) 
+		&& !strncmp(dstip, node->cfg.src_ip, IP_LEN) 
+		&& node->cfg.src_port == ntohs(udp->dest)
+		&& node->cfg.dst_port == ntohs(udp->source)) {
+		node->status = 0;
+		timer = node->cfg.interval * node->cfg.retry_times;
+		thread_mod_timer(node->detect_node.timeout, timer);
+	} else {
+		log_message(LOG_INFO, "Receive udp message: (%s:%u) <--> (%s:%u).",
+				srcip, ntohs(udp->source), dstip, ntohs(udp->dest));
+	}
+out:
+	thread_add_read(thread->master, udp_read_func, NULL, sock, TIMER_NEVER);
+	return 0;
+}
+
 static int
 icmp_recv_parse_func(thread_t *thread)
 {
@@ -259,12 +310,15 @@ icmp_recv_parse_func(thread_t *thread)
 	icmp = (struct icmphdr *)(recv_buffer + sizeof(struct iphdr));
 	if (icmp->type == ICMP_ECHOREPLY) {
 		ld_detect_t *detect = NULL;
-		
 		memcpy(&recv_ip, &iph->saddr, sizeof(recv_ip));
 		memcpy(src_ip, inet_ntoa(recv_ip), sizeof(src_ip));
+#if 0	
+		memcpy(src_ip, inet_ntoa(ip->saddr), sizeof(src_ip));
+#endif
 
 		list_for_each_entry(detect, &global_cfg.detect_list, node) {
-			if (!strcmp(detect->cfg.dst_ip, src_ip)) {
+			if (!strcmp(detect->cfg.dst_ip, src_ip) &&
+					detect->cfg.protocol == LD_PROTO_ICMP) {
 				log_message(LOG_INFO, "Recv the icmp reply from '%s'.", src_ip);
 				timer = detect->cfg.interval * detect->cfg.retry_times;
 				detect->status = 0;
@@ -286,15 +340,14 @@ static int
 icmp_recv_init(void)
 {
 	int sock = -1;
-	int flags = 0;
 
 	sock = open_read_socket(AF_INET, IPPROTO_ICMP, NULL);
 	if (sock < 0) {
 		log_message(LOG_INFO, "cant create icmp receive socket.");
 		return -1;
 	}
-	flags = fcntl(sock, F_GETFL, 0);
-	fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+
+	set_fd_nonblock(sock);
 	thread_add_read(master, icmp_recv_parse_func, NULL, sock, TIMER_NEVER);
 	return 0;
 }
