@@ -664,6 +664,7 @@ int
 parse_detect_cfg_msg(int sock, ld_msg_type_t type, struct msg_hdr *msg)
 {
 	int ret = 1;
+	int exist_flag = 0;
 	rte_json_t *json = NULL, *item = NULL, *entry = NULL;
 	int detect_num = 0, i = 0;
 	ld_detect_t *detect = NULL, *detect_node = NULL, *tmp = NULL;
@@ -680,6 +681,7 @@ parse_detect_cfg_msg(int sock, ld_msg_type_t type, struct msg_hdr *msg)
 	detect_num = rte_array_get_size(item);
 
 	for (i = 0; i < detect_num; i++) {
+		log_message(LOG_INFO, "detect_num: %d", detect_num);
 		entry = rte_array_get_item(item, i);			
 		if (entry == NULL) {
 			log_message(LOG_INFO, "Failed to get item '%d'", i);
@@ -691,20 +693,25 @@ parse_detect_cfg_msg(int sock, ld_msg_type_t type, struct msg_hdr *msg)
 		}
 		switch (type) {
 		case ADD_DETECT_CONFIG_TYPE:	
+			log_message(LOG_INFO, "Recv ADD_DETECT_CONFIG_TYPE message.");
 			list_for_each_entry(detect_node,
 					&global_cfg.detect_list, node) {
 				if (detect->cfg.id == detect_node->cfg.id) {
 					log_message(LOG_INFO,
 						"detect id '%d' exist.", detect->cfg.id);
 					FREE(detect);
+					exist_flag = 1;
 					break;
 				}
 			}
-			list_add(&detect->node, &global_cfg.detect_list);
-			/* init the detect node and create the thread */
-			detect_node_entry_init(detect);
+			if (!exist_flag) {
+				list_add(&detect->node, &global_cfg.detect_list);
+				/* init the detect node and create the thread */
+				detect_node_entry_init(detect);
+			}
 			break;
 		case MOD_DETECT_CONFIG_TYPE:			
+			log_message(LOG_INFO, "Recv MOD_DETECT_CONFIG_TYPE message.");
 			list_for_each_entry_safe(detect_node, tmp,
 					&global_cfg.detect_list, node) {
 				if (detect->cfg.id == detect_node->cfg.id) {
@@ -712,6 +719,7 @@ parse_detect_cfg_msg(int sock, ld_msg_type_t type, struct msg_hdr *msg)
 					detect_node_thread_cancle(detect_node);
 					list_del(&detect_node->node);
 					FREE(detect_node);
+					break;
 				}
 			}
 			list_add(&detect->node, &global_cfg.detect_list);
@@ -719,9 +727,11 @@ parse_detect_cfg_msg(int sock, ld_msg_type_t type, struct msg_hdr *msg)
 			detect_node_entry_init(detect);
 			break;
 		case DEL_DETECT_CONFIG_TYPE:
+			log_message(LOG_INFO, "Recv DEL_DETECT_CONFIG_TYPE message.");
 			list_for_each_entry_safe(detect_node, tmp,
 					&global_cfg.detect_list, node) {
 				if (detect->cfg.id == detect_node->cfg.id) {
+					detect_node_thread_cancle(detect_node);
 					list_del(&detect_node->node);
 					FREE(detect_node);
 				}

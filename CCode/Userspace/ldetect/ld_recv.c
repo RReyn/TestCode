@@ -45,8 +45,8 @@ response_config_msg(int sock, int ret_value, void *arg UNUSED)
 	}
 	msg->len = len + sizeof(struct msg_hdr);
 	msg->msg_type = ACK_CONFIG_TYPE;
-
-	ret = writen(sock, msg, msg->len);
+	log_message(LOG_INFO, "[%s:%d] response buf: %s.", __FUNCTION__, __LINE__, msg->msg_data);
+	ret = write(sock, msg, msg->len);
 	if (ret < 0) {
 		log_message(LOG_ERR, "Failed to send response msg.");
 		goto out;
@@ -136,17 +136,21 @@ ldetect_parse_msg(thread_t *thread)
 	struct msg_hdr *msg = NULL;
 	int ret = 0, i = 0;
 
-	log_message(LOG_INFO, "In function '%', socket=%d.",
+	log_message(LOG_INFO, "In function '%s', socket=%d.",
 			__FUNCTION__, sock);
 
-	read_len = readn(sock, recv_buffer, MAX_RECV_LEN);
-	if (read_len < 0) {
-		log_message(LOG_ERR, "Receive error.");
-		close(sock);
-		memset(recv_buffer, 0, MAX_RECV_LEN);
-		return -1;
+	memset(recv_buffer, 0, MAX_RECV_LEN);
+	read_len = read(sock, recv_buffer, MAX_RECV_LEN);
+	if (read_len <= 0) {
+		if (errno == EINTR) {
+			goto out;
+		} else {
+			close(sock);
+			return -1;
+		}
 	}
 
+	log_message(LOG_INFO, "read_len: %d, recv_buffer: %s", read_len, recv_buffer);
 	msg = (struct msg_hdr *)recv_buffer;
 	if (read_len < msg->len) {
 		log_message(LOG_DEBUG,
@@ -154,15 +158,18 @@ ldetect_parse_msg(thread_t *thread)
 			msg->len, read_len);
 		goto out;
 	}
-
+	log_message(LOG_INFO, "Recv msg_type: %d, msg: %s", msg->msg_type, msg->msg_data);
 	if (msg->msg_type < ACK_CONFIG_TYPE 
 			|| msg->msg_type >= MAX_CONFIG_TYPE) {
-		response_config_msg(sock, INVALID_MSG, NULL);
-		goto out;
+		if (msg->msg_type == 0) {
+			close(sock);
+			return -1;
+		}
 	}
 	for (i = 0; i < ARRAY_SIZE(msg_handler); i++) {
 		if (msg->msg_type == msg_handler[i].type) {
 			ret = msg_handler[i].handler(sock, msg->msg_type, msg);
+			log_message(LOG_INFO, "handler[%d] ret=%d.", i,ret);
 			msg_handler[i].response(sock, ret, NULL);
 		}
 	}
@@ -171,7 +178,6 @@ ldetect_parse_msg(thread_t *thread)
 		ldetect_store_config();
 	}
 out:
-	memset(recv_buffer, 0, MAX_RECV_LEN);
 	thread_add_read(thread->master, ldetect_parse_msg, NULL, sock, TIMER_NEVER);
 	return 0;
 }
@@ -193,7 +199,7 @@ ldetect_listen_func(thread_t *thread)
 		log_message(LOG_ERR, "Accept error.");
 		goto listen_end;
 	}
-
+	log_message(LOG_INFO, "[%s:%d] Accept_sock: %d\n", __FUNCTION__, __LINE__, accept_sock);
 	thread_add_read(thread->master, ldetect_parse_msg, NULL, accept_sock, TIMER_NEVER);
 listen_end:
 	thread_add_read(thread->master, ldetect_listen_func, NULL, sock, TIMER_NEVER);
@@ -248,6 +254,8 @@ udp_read_func(thread_t *thread)
 
 	memset(recv_buffer, 0, MAX_RECV_LEN);
 
+	if (sock == 0)
+		log_message(LOG_INFO, "[%s:%d] sock = %d.", __FUNCTION__, __LINE__, sock);
 	if (recvfrom(sock, recv_buffer, MAX_RECV_LEN, 0,
 			(struct sockaddr *)&from, &from_len) < 0) {
 		goto out;
@@ -259,10 +267,7 @@ udp_read_func(thread_t *thread)
 		goto out;
 	}
 	udp = (struct udphdr *)(recv_buffer + sizeof(struct iphdr));
-#if 0
-	memcpy(&recv_ip, &iph->saddr, sizeof(recv_ip));
-	memcpy(src_ip, inet_ntoa(recv_ip), sizeof(src_ip));
-#endif
+
 	memcpy(&src_ip, &iph->saddr, sizeof(src_ip));
 	memcpy(srcip, inet_ntoa(src_ip), sizeof(srcip));
 	memcpy(&dst_ip, &iph->saddr, sizeof(dst_ip));
@@ -296,15 +301,22 @@ icmp_recv_parse_func(thread_t *thread)
 	unsigned long timer = 0;
 
 	memset(recv_buffer, 0, MAX_RECV_LEN);
-
+	if (sock == 0) {
+		sock = open_read_socket(AF_INET, IPPROTO_ICMP, NULL);	
+		if (sock < 0)
+			abort(); /* restart program */
+		set_fd_nonblock(sock);
+	}
 	if (recvfrom(sock, recv_buffer, MAX_RECV_LEN, 0,
 			(struct sockaddr *)&from, &from_len) < 0) {
 		goto out;
 	}
 	iph = (struct iphdr *)recv_buffer;
 	if (iph->protocol != IPPROTO_ICMP) {
+#if 0
 		log_message(LOG_INFO, "no icmp message, receive protocol=%d",
 			iph->protocol);
+#endif
 		goto out;
 	}
 	icmp = (struct icmphdr *)(recv_buffer + sizeof(struct iphdr));
@@ -312,14 +324,13 @@ icmp_recv_parse_func(thread_t *thread)
 		ld_detect_t *detect = NULL;
 		memcpy(&recv_ip, &iph->saddr, sizeof(recv_ip));
 		memcpy(src_ip, inet_ntoa(recv_ip), sizeof(src_ip));
-#if 0	
-		memcpy(src_ip, inet_ntoa(ip->saddr), sizeof(src_ip));
-#endif
 
 		list_for_each_entry(detect, &global_cfg.detect_list, node) {
 			if (!strcmp(detect->cfg.dst_ip, src_ip) &&
 					detect->cfg.protocol == LD_PROTO_ICMP) {
+#if 0
 				log_message(LOG_INFO, "Recv the icmp reply from '%s'.", src_ip);
+#endif
 				timer = detect->cfg.interval * detect->cfg.retry_times;
 				detect->status = 0;
 				thread_mod_timer(detect->detect_node.timeout, timer);
@@ -327,8 +338,10 @@ icmp_recv_parse_func(thread_t *thread)
 			}
 		}
 	} else {
+#if 0
 		log_message(LOG_INFO, "Not ICMP_ECHOREPLY message, type=%d.",
 			icmp->type);
+#endif
 	}
 out:
 	thread_add_read(thread->master, icmp_recv_parse_func, NULL,

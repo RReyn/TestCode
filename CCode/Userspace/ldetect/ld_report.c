@@ -96,7 +96,9 @@ _ldetect_report_status(thread_t *thread)
 	if (detect_count > 0) {
 		send_report_msg(header, detect_count, len);
 	}
+#if 0
 	log_message(LOG_INFO, "Report_sock interval: %d.", report_sock->interval);
+#endif
 
 out:
 	thread_add_timer(thread->master, _ldetect_report_status,
@@ -137,7 +139,9 @@ ldetect_report_init(void)
 	report_sock->serv.sin_addr.s_addr =
 		inet_addr(global_cfg.report.serv_addr);
 	report_sock->interval = global_cfg.report.interval;
+#if 0
 	log_message(LOG_INFO, "report_sock->interval: %d.", report_sock->interval);
+#endif
 
 	return 0;
 msg_err:
